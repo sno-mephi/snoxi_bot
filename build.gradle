@@ -3,6 +3,7 @@ plugins {
 	id 'org.springframework.boot' version '3.1.2'
 	id 'io.spring.dependency-management' version '1.1.2'
 	id 'org.jetbrains.kotlin.jvm' version '1.9.0'
+	id 'org.jetbrains.kotlin.plugin.serialization' version '1.7.20'
 }
 
 group = 'ru.idfedorov09.telegram.bot'
@@ -42,6 +43,13 @@ dependencies {
 	implementation('com.github.sno-mephi:flow-library:2.0.0-stable') {
 		exclude group: 'org.slf4j', module: 'slf4j-simple'
 	}
+
+	implementation "io.ktor:ktor-client-core:2.3.6"
+	implementation "io.ktor:ktor-client-json:2.3.6"
+	implementation "io.ktor:ktor-client-cio:2.3.6"
+	implementation "io.ktor:ktor-client-content-negotiation:2.3.6"
+	implementation "io.ktor:ktor-serialization-kotlinx-json:2.3.6"
+	implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2"
 }
 
 jar {
