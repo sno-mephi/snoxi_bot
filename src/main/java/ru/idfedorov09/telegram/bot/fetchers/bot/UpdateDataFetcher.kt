@@ -16,11 +16,10 @@ class UpdateDataFetcher(
     fun doFetch(
         userActualizedInfo: UserActualizedInfo,
     ) {
-        var userToSave = SnoxiUser(
+        val userToSave = SnoxiUser(
+            id = userActualizedInfo.snoxiId,
             tui = userActualizedInfo.tui,
         )
-
-        if (userActualizedInfo.snoxiId != null) userToSave = userToSave.copy(id = userActualizedInfo.snoxiId)
 
         snoxiUserRepository.save(
             userToSave,
