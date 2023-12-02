@@ -1,6 +1,5 @@
 package ru.idfedorov09.telegram.bot.flow
 
-import ru.idfedorov09.telegram.bot.data.enums.BotStage
 import ru.mephi.sno.libs.flow.belly.Mutable
 
 /**
@@ -8,5 +7,7 @@ import ru.mephi.sno.libs.flow.belly.Mutable
  */
 @Mutable
 data class ExpContainer(
-    var botStage: BotStage = BotStage.OFFLINE
+    var byChat: Boolean = false,
+    var byUser: Boolean = false,
+    var isValid: Boolean = false,
 )
