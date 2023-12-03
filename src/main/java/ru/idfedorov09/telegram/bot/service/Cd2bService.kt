@@ -9,6 +9,7 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.runBlocking
 import org.springframework.stereotype.Service
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
+import java.net.ConnectException
 
 @Service
 class Cd2bService {
@@ -20,9 +21,13 @@ class Cd2bService {
     }
 
     // TODO: настроить адрес cd2b
-    fun getAllProfiles(): List<ProfileResponse> {
-        val response: List<ProfileResponse> = runBlocking {
-            client.post("http://127.0.0.1:8000/all_profiles").body()
+    fun getAllProfiles(): List<ProfileResponse>? {
+        val response: List<ProfileResponse>? = runBlocking {
+            try {
+                client.post("http://127.0.0.1:8000/all_profiles").body()
+            } catch (e: ConnectException) {
+                null
+            }
         }
         return response
     }
