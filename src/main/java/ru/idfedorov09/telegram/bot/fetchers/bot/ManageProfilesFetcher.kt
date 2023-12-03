@@ -9,6 +9,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
 import ru.idfedorov09.telegram.bot.data.model.CallbackData
+import ru.idfedorov09.telegram.bot.data.model.Cd2bError
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
 import ru.idfedorov09.telegram.bot.data.model.UserActualizedInfo
 import ru.idfedorov09.telegram.bot.executor.Executor
@@ -53,23 +54,7 @@ class ManageProfilesFetcher(
         update: Update,
         userActualizedInfo: UserActualizedInfo,
     ) {
-        val sentMsg = bot.execute(
-            SendMessage().also {
-                it.chatId = userActualizedInfo.tui
-                it.text = "Собираю информацию о профилях..."
-            },
-        )
-        buildConsole(
-            userActualizedInfo.tui,
-            sentMsg.messageId.toString(),
-        ) ?: bot.execute(
-            EditMessageText().also {
-                it.chatId = userActualizedInfo.tui
-                it.messageId = sentMsg.messageId
-                it.text = "❗\uFE0FОбнаружен инцидент: *cd2b* недоступен\\."
-                it.parseMode = ParseMode.MARKDOWNV2
-            },
-        )
+        buildConsole(userActualizedInfo.tui)
     }
 
     /**
@@ -77,13 +62,51 @@ class ManageProfilesFetcher(
      * chatId - id чата, в котором строится клавиатура
      * messageId - id сообщения, на котором отобразится консоль
      * desc - текст-описание
+     * onFailDesc - текст-описание при некорректной работе cd2b
      */
     private fun buildConsole(
         chatId: String,
-        messageId: String?,
-        desc: String = "\uD83D\uDC40 Выбери профиль:",
+        consoleMessageId: String? = null,
     ): CallbackKeyboardStorage? {
-        val profiles = cd2bService.getAllProfiles() ?: return null
+        val messageId = when {
+            consoleMessageId != null -> consoleMessageId
+            else -> {
+                val sent = bot.execute(
+                    SendMessage().also {
+                        it.chatId = chatId
+                        it.text = "Собираю информацию о профилях..."
+                    },
+                )
+                sent.messageId.toString()
+            }
+        }
+
+        val errorStorage = mutableListOf<Cd2bError>()
+
+        val profiles = cd2bService.getAllProfiles(errorStorage) ?: run {
+            val error = errorStorage.lastOrNull()
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = chatId
+                    it.messageId = messageId.toInt()
+
+                    // TODO: написать сервис для иницидентов
+                    val statusCode = "${error?.statusCode}".markdownFormat()
+                    val desc = "${error?.statusDescription}".markdownFormat()
+                    val trace = "${error?.stackTrace}".markdownFormat()
+
+                    val text = "❗\uFE0FОбнаружен инцидент\\. Сервис cd2b вернул код `$statusCode`.\n" +
+                        "Описание: `$desc`\n" +
+                        "Трасса:\n```\n$trace"
+                            .short(4096 - 5)
+                            .plus("..```")
+
+                    it.text = text
+                    it.parseMode = ParseMode.MARKDOWNV2
+                },
+            )
+            return null
+        }
         val callbackKeyboardStorage = CallbackKeyboardStorage()
 
         val chunkedProfiles = profiles
@@ -118,16 +141,14 @@ class ManageProfilesFetcher(
 
         callbackKeyboardStorage.keyboard = chunkedProfiles
 
-        messageId?.let { id ->
-            bot.execute(
-                EditMessageText().also {
-                    it.chatId = chatId
-                    it.messageId = id.toInt()
-                    it.text = desc
-                    it.replyMarkup = createKeyboard(chunkedProfiles)
-                },
-            )
-        }
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = chatId
+                it.messageId = messageId.toInt()
+                it.text = "\uD83D\uDC40 Выбери профиль:"
+                it.replyMarkup = createKeyboard(chunkedProfiles)
+            },
+        )
         return callbackKeyboardStorage
     }
 
@@ -150,6 +171,15 @@ class ManageProfilesFetcher(
     private fun createKeyboard(keyboard: List<List<InlineKeyboardButton>>) =
         InlineKeyboardMarkup().also { it.keyboard = keyboard }
 
+    // нужно чтобы не словить слишком длинное сообщение
+    private fun String.short(maxLength: Int = 4096): String {
+        return if (this.length > maxLength) {
+            this.substring(0, maxLength - 3).plus("...")
+        } else {
+            this
+        }
+    }
+
     private data class CallbackKeyboardStorage(
         private val store: MutableList<CallbackData> = mutableListOf(),
         var keyboard: List<List<InlineKeyboardButton>> = listOf(listOf()),
@@ -160,5 +190,27 @@ class ManageProfilesFetcher(
             messageId: String,
             callbackDataRepository: CallbackDataRepository,
         ) = callbackDataRepository.saveAll(store.map { it.copy(messageId = messageId) })
+    }
+
+    private fun String.markdownFormat(): String {
+        return this
+            .replace("_", "\\_")
+            .replace("*", "\\*")
+            .replace("[", "\\[")
+            .replace("]", "\\]")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+            .replace("~", "\\~")
+            .replace("`", "\\`")
+            .replace(">", "\\>")
+            .replace("#", "\\#")
+            .replace("+", "\\+")
+            .replace("-", "\\-")
+            .replace("=", "\\=")
+            .replace("|", "\\|")
+            .replace("{", "\\{")
+            .replace("}", "\\}")
+            .replace(".", "\\.")
+            .replace("!", "\\!")
     }
 }
