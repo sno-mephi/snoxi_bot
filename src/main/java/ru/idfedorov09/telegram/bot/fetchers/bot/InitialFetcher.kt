@@ -85,7 +85,7 @@ class InitialFetcher(
         }
 
         // Если пользователь впервые пишет боту после получения доступа, отправляем это
-        if (snoxiUser.id == null) {
+        if (snoxiUser.id == null || text.startsWith("/start")) {
             val mainKeyboard = ReplyKeyboardMarkup().also {
                 it.keyboard = listOf(
                     KeyboardRow().also { it.add(TextCommands.MANAGE_PROFILES.commandText) },
