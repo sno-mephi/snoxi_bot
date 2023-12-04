@@ -7,6 +7,7 @@ import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageTe
 import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.MAX_MSG_LENGTH
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
 import ru.idfedorov09.telegram.bot.data.model.CallbackData
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
@@ -15,6 +16,8 @@ import ru.idfedorov09.telegram.bot.data.model.UserActualizedInfo
 import ru.idfedorov09.telegram.bot.executor.Executor
 import ru.idfedorov09.telegram.bot.repo.CallbackDataRepository
 import ru.idfedorov09.telegram.bot.service.Cd2bService
+import ru.idfedorov09.telegram.bot.util.MessageUtils.markdownFormat
+import ru.idfedorov09.telegram.bot.util.MessageUtils.shortMessage
 import ru.idfedorov09.telegram.bot.util.UpdatesUtil
 import ru.mephi.sno.libs.flow.belly.InjectData
 import ru.mephi.sno.libs.flow.fetcher.GeneralFetcher
@@ -39,7 +42,7 @@ class ManageProfilesFetcher(
 
         when {
             update.hasCallbackQuery() -> handleButtons(update, userActualizedInfo)
-            text == TextCommands.MANAGE_PROFILES.commandText -> startManage(update, userActualizedInfo)
+            text == TextCommands.MANAGE_PROFILES.commandText -> buildConsole(userActualizedInfo.tui)
         }
     }
 
@@ -47,14 +50,84 @@ class ManageProfilesFetcher(
         update: Update,
         userActualizedInfo: UserActualizedInfo,
     ) {
+        val callbackData = callbackDataRepository.findById(
+            update.callbackQuery.data.toLong(),
+        ).get()
+
+        callbackData.callbackData?.apply {
+            when {
+                startsWith("new profile") -> newProfile()
+                startsWith("#profile") -> selectProfile(update, userActualizedInfo, callbackData)
+                startsWith("#back") -> buildConsole(
+                    userActualizedInfo.tui,
+                    update.callbackQuery.message.messageId.toString(),
+                )
+            }
+        }
+    }
+
+    private fun newProfile() {
         TODO()
     }
 
-    private fun startManage(
+    private fun selectProfile(
         update: Update,
         userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
     ) {
-        buildConsole(userActualizedInfo.tui)
+        val profileName = callbackData.callbackData?.split("|")?.last() ?: return
+        val messageId = update.callbackQuery.message.messageId
+        val profileResponse = cd2bService.checkProfile(profileName) ?: return
+
+        val name = profileResponse.name.markdownFormat()
+        val repoUrl = profileResponse.repoUri
+        val imageName = profileResponse.imageName.markdownFormat()
+
+        val isRunningText = if (profileResponse.isRunning) {
+            "\uD83D\uDFE2Запущен"
+        } else {
+            "\uD83D\uDD34Не запущен"
+        }.markdownFormat()
+
+        val text = "_Информация о профиле_ `$name`:\n\n" +
+            "✏\uFE0FИмя приложения: [${profileResponse.repoName}]($repoUrl)\n" +
+            "$isRunningText\n" +
+            "\uD83D\uDCF6Активный порт: ${profileResponse.port}\n" +
+            "\uD83D\uDCE6Имя Docker-image: $imageName"
+
+        val callback = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId.toString(),
+                callbackData = "#back",
+            ),
+        )
+
+        // TODO: добавить кнопки:
+        // - удалить
+        // - установить порт
+        // - установить проперти
+        // - запустить/перезапустить
+
+        val keyboard = createKeyboard(
+            listOf(
+                listOf(
+                    InlineKeyboardButton().also {
+                        it.text = "◀\uFE0FНазад"
+                        it.callbackData = callback.id.toString()
+                    },
+                ),
+            ),
+        )
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId
+                it.text = text
+                it.replyMarkup = keyboard
+                it.parseMode = ParseMode.MARKDOWN
+            },
+        )
     }
 
     /**
@@ -69,7 +142,16 @@ class ManageProfilesFetcher(
         consoleMessageId: String? = null,
     ): CallbackKeyboardStorage? {
         val messageId = when {
-            consoleMessageId != null -> consoleMessageId
+            consoleMessageId != null -> {
+                bot.execute(
+                    EditMessageText().also {
+                        it.chatId = chatId
+                        it.messageId = consoleMessageId.toInt()
+                        it.text = "Собираю информацию о профилях..."
+                    },
+                )
+                consoleMessageId
+            }
             else -> {
                 val sent = bot.execute(
                     SendMessage().also {
@@ -98,8 +180,8 @@ class ManageProfilesFetcher(
                     val text = "❗\uFE0FОбнаружен инцидент\\. Сервис cd2b вернул код `$statusCode`.\n" +
                         "Описание: `$desc`\n" +
                         "Трасса:\n```\n$trace"
-                            .short(4096 - 5)
-                            .plus("..```")
+                            .shortMessage(4096 - 3)
+                            .plus("```")
 
                     it.text = text
                     it.parseMode = ParseMode.MARKDOWNV2
@@ -160,7 +242,7 @@ class ManageProfilesFetcher(
             val callback = callbackDataRepository.save(
                 CallbackData(
                     messageId = messageId,
-                    callbackData = "profile|${this.name}",
+                    callbackData = "#profile|${this.name}",
                 ),
             )
             callbackKeyboardStorage.addCallback(callback)
@@ -170,15 +252,6 @@ class ManageProfilesFetcher(
 
     private fun createKeyboard(keyboard: List<List<InlineKeyboardButton>>) =
         InlineKeyboardMarkup().also { it.keyboard = keyboard }
-
-    // нужно чтобы не словить слишком длинное сообщение
-    private fun String.short(maxLength: Int = 4096): String {
-        return if (this.length > maxLength) {
-            this.substring(0, maxLength - 3).plus("...")
-        } else {
-            this
-        }
-    }
 
     private data class CallbackKeyboardStorage(
         private val store: MutableList<CallbackData> = mutableListOf(),
@@ -190,27 +263,5 @@ class ManageProfilesFetcher(
             messageId: String,
             callbackDataRepository: CallbackDataRepository,
         ) = callbackDataRepository.saveAll(store.map { it.copy(messageId = messageId) })
-    }
-
-    private fun String.markdownFormat(): String {
-        return this
-            .replace("_", "\\_")
-            .replace("*", "\\*")
-            .replace("[", "\\[")
-            .replace("]", "\\]")
-            .replace("(", "\\(")
-            .replace(")", "\\)")
-            .replace("~", "\\~")
-            .replace("`", "\\`")
-            .replace(">", "\\>")
-            .replace("#", "\\#")
-            .replace("+", "\\+")
-            .replace("-", "\\-")
-            .replace("=", "\\=")
-            .replace("|", "\\|")
-            .replace("{", "\\{")
-            .replace("}", "\\}")
-            .replace(".", "\\.")
-            .replace("!", "\\!")
     }
 }
