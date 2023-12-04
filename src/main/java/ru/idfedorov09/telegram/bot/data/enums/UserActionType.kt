@@ -4,4 +4,5 @@ enum class UserActionType {
     DEFAULT,
 
     TYPING_PORT,
+    SENDING_PROPERTIES,
 }

@@ -4,9 +4,11 @@ import com.google.gson.Gson
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
+import org.telegram.telegrambots.meta.api.methods.GetFile
 import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.User
 import ru.idfedorov09.telegram.bot.config.BotContainer
+import ru.idfedorov09.telegram.bot.executor.Executor
 import ru.idfedorov09.telegram.bot.service.RedisService
 import java.util.regex.Pattern
 
@@ -15,6 +17,7 @@ class UpdatesUtil(
     private val gson: Gson,
     private val redisService: RedisService,
     private val botContainer: BotContainer,
+    private val bot: Executor,
 ) {
     companion object {
         private val log = LoggerFactory.getLogger(UpdatesUtil::class.java)
@@ -82,5 +85,14 @@ class UpdatesUtil(
         removeKeyPrefix("cht_num_")
         removeKeyPrefix(botContainer.messageQueuePrefix)
         log.info("Removed.")
+    }
+
+    /** Строит url пришедшего в update файла **/
+    fun fileUrl(update: Update?): String? {
+        update ?: return null
+        if (!(update.hasMessage() && update.message.hasDocument())) return null
+        val fileId: String = update.message.document.fileId
+        val file = bot.execute(GetFile().also { it.fileId = fileId })
+        return "https://api.telegram.org/file/bot" + botContainer.BOT_TOKEN + "/" + file.filePath
     }
 }
