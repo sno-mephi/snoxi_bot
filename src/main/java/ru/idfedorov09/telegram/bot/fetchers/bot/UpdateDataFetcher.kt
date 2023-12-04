@@ -19,6 +19,8 @@ class UpdateDataFetcher(
         val userToSave = SnoxiUser(
             id = userActualizedInfo.snoxiId,
             tui = userActualizedInfo.tui,
+            data = userActualizedInfo.data,
+            currentUserActionType = userActualizedInfo.currentActionType,
         )
 
         snoxiUserRepository.save(
