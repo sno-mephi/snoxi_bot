@@ -62,6 +62,8 @@ class InitialFetcher(
             lastTgNick = user.lastTgNick,
             fullName = user.fullName,
             studyGroup = user.studyGroup,
+            currentActionType = snoxiUser.currentUserActionType,
+            data = snoxiUser.data,
             roles = user.roles,
         )
 

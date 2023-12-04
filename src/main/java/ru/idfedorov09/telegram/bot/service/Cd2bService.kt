@@ -5,8 +5,10 @@ import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.Serializable
 import org.springframework.stereotype.Service
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
@@ -39,6 +41,18 @@ class Cd2bService {
         )
     }
 
+    fun setPort(
+        profileName: String,
+        port: String,
+        errorStorage: MutableList<Cd2bError> = mutableListOf(),
+    ): ProfileResponse? {
+        return doPost(
+            errorStorage = errorStorage,
+            endpoint = "/set_port",
+            params = mapOf("profile_name" to profileName, "port" to port),
+        )
+    }
+
     private inline fun <reified T> doPost(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
         endpoint: String,
@@ -47,11 +61,18 @@ class Cd2bService {
         val response: T? =
             runBlocking {
                 try {
-                    client.post("http://127.0.0.1:8000/${endpoint.removePrefix("/")}") {
+                    val response = client.post("http://127.0.0.1:8000/${endpoint.removePrefix("/")}") {
                         params.forEach {
                             parameter(it.key, it.value)
                         }
-                    }.body<T>()
+                    }
+
+                    if (response.status.value != 200) {
+                        errorStorage.addAll(catchInvalidQuery(response))
+                        null
+                    } else {
+                        response.body<T>()
+                    }
                 } catch (e: Exception) {
                     errorStorage.addAll(catchException(e))
                     null
@@ -60,6 +81,26 @@ class Cd2bService {
         return response
     }
 
+    /**
+     * Функция обрабатывающая запрос, который некорректно обработался на сервере
+     */
+    private suspend fun catchInvalidQuery(
+        response: HttpResponse,
+    ): List<Cd2bError> {
+        val errorsList = mutableListOf<Cd2bError>()
+
+        @Serializable data class ErrorDetail(val detail: String)
+        val errorDetail: ErrorDetail = response.body()
+
+        errorsList.add(
+            Cd2bError(
+                statusCode = response.status.value,
+                statusDescription = errorDetail.detail,
+            ),
+        )
+
+        return errorsList
+    }
     private fun catchException(e: Exception): List<Cd2bError> {
         val errorsList = mutableListOf<Cd2bError>()
 
