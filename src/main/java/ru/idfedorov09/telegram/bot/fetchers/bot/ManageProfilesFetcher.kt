@@ -9,6 +9,7 @@ import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
+import ru.idfedorov09.telegram.bot.data.enums.UserActionType.SENDING_PROPERTIES
 import ru.idfedorov09.telegram.bot.data.enums.UserActionType.TYPING_PORT
 import ru.idfedorov09.telegram.bot.data.model.CallbackData
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
@@ -44,6 +45,16 @@ class ManageProfilesFetcher(
         when {
             update.hasCallbackQuery() -> handleButtons(update, userActualizedInfo)
             update.hasMessage() && update.message.hasText() -> handleText(update, userActualizedInfo, text)
+            update.hasMessage() && update.message.hasDocument() -> handeDocs(update, userActualizedInfo)
+        }
+    }
+
+    private fun handeDocs(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+    ) {
+        when {
+            userActualizedInfo.currentActionType == SENDING_PROPERTIES -> receiveProperties(update, userActualizedInfo)
         }
     }
 
@@ -85,7 +96,6 @@ class ManageProfilesFetcher(
                 }
                 startsWith("#back_to_list") -> {
                     resetUserData(userActualizedInfo, removeConsole = false)
-                    // val messageId = callbackDataRepository.findById(update.callbackQuery.data.toLong()).get().messageId
                     buildConsole(
                         userActualizedInfo.tui,
                         update.callbackQuery.message.messageId.toString(),
@@ -95,7 +105,103 @@ class ManageProfilesFetcher(
                     resetUserData(userActualizedInfo, removeConsole = false)
                     clickSetPort(update, userActualizedInfo, callbackData)
                 }
+                startsWith("#upd_prop") -> {
+                    resetUserData(userActualizedInfo, removeConsole = false)
+                    clickUpdateProperties(update, userActualizedInfo, callbackData)
+                }
             }
+        }
+    }
+
+    private fun clickUpdateProperties(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
+    ) {
+        val profileName = callbackData.callbackData?.split("|")?.last() ?: return
+        val messageId = update.callbackQuery.message.messageId
+
+        userActualizedInfo.currentActionType = SENDING_PROPERTIES
+        userActualizedInfo.data = "$profileName|$messageId"
+
+        val cancelButton = cancelButton(
+            messageId.toString(),
+            profileName,
+        )
+
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        // TODO: ссылка на текущий файл с настройками
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId
+                it.text = "_Ты редактируешь файл_ `application.properties` _профиля_ `$profileName`.\n\n" +
+                    "В следующем сообщении отправь файл с пропертями. " +
+                    "Обрати внимание, что указанный там порт приложения *будет проигнорирован*."
+                it.replyMarkup = keyboard
+                it.parseMode = ParseMode.MARKDOWN
+            },
+        )
+    }
+
+    private fun receiveProperties(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+    ) {
+        val data = userActualizedInfo.data ?: return
+
+        val profileName = data.split("|")[0]
+        val messageId = data.split("|")[1]
+
+        val fileUrl = updatesUtil.fileUrl(update) ?: return
+
+        bot.execute(
+            DeleteMessage().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = update.message.messageId
+            },
+        )
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId.toInt()
+                it.text = "Пробую обновить проперти..."
+            },
+        )
+
+        val errorStorage = mutableListOf<Cd2bError>()
+
+        val response = cd2bService.uploadProperties(
+            profileName,
+            fileUrl,
+            errorStorage,
+        )
+
+        val cancelButton = cancelButton(
+            messageId,
+            profileName,
+        )
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        if (errorStorage.any { it.statusCode != 200 }) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "Произошла ошибка сервера. Попробуйте загрузить файл еще раз."
+                    it.replyMarkup = keyboard
+                },
+            )
+        } else {
+            showProfileInfo(
+                profileName = profileName,
+                messageId = messageId,
+                chatId = userActualizedInfo.tui,
+            )
+
+            userActualizedInfo.currentActionType = null
+            userActualizedInfo.data = null
         }
     }
 
@@ -110,32 +216,21 @@ class ManageProfilesFetcher(
 
         val name = profileResponse.name.markdownFormat()
 
-        val callbackBack = callbackDataRepository.save(
-            CallbackData(
-                messageId = messageId.toString(),
-                callbackData = "#profile|$profileName",
-            ),
-        )
-
-        val keyboard = createKeyboard(
-            listOf(
-                listOf(
-                    InlineKeyboardButton().also {
-                        it.text = "Отмена"
-                        it.callbackData = callbackBack.id.toString()
-                    },
-                ),
-            ),
-        )
-
         userActualizedInfo.currentActionType = TYPING_PORT
         userActualizedInfo.data = "$profileName|$messageId"
+
+        val cancelButton = cancelButton(
+            messageId.toString(),
+            profileName,
+        )
+
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
 
         bot.execute(
             EditMessageText().also {
                 it.chatId = userActualizedInfo.tui
                 it.messageId = messageId
-                it.text = "_Вы редактируете порт профиля_ `$name`.\n" +
+                it.text = "_Ты редактируешь порт профиля_ `$name`.\n" +
                     "Текущий порт: `${profileResponse.port}`.\n\n" +
                     "В следующем сообщении отправь порт, который ты хочешь установить."
                 it.parseMode = ParseMode.MARKDOWN
@@ -196,23 +291,12 @@ class ManageProfilesFetcher(
             errorStorage,
         )
 
-        val callbackBack = callbackDataRepository.save(
-            CallbackData(
-                messageId = messageId,
-                callbackData = "#profile|$profileName",
-            ),
+        val cancelButton = cancelButton(
+            messageId,
+            profileName,
         )
 
-        val keyboard = createKeyboard(
-            listOf(
-                listOf(
-                    InlineKeyboardButton().also {
-                        it.text = "Отмена"
-                        it.callbackData = callbackBack.id.toString()
-                    },
-                ),
-            ),
-        )
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
 
         if (errorStorage.any { it.statusCode == 400 }) {
             bot.execute(
@@ -289,23 +373,34 @@ class ManageProfilesFetcher(
                 callbackData = "#set_port|$profileName",
             ),
         )
+        val callbackUpdProperty = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#upd_prop|$profileName",
+            ),
+        )
 
         // TODO: добавить кнопки:
         // - удалить
-        // - установить проперти
         // - запустить/перезапустить
 
         val keyboard = createKeyboard(
             listOf(
                 listOf(
                     InlineKeyboardButton().also {
-                        it.text = "\uD83D\uDCF6Настройка порта"
+                        it.text = "\uD83D\uDCF6 Настройка порта"
                         it.callbackData = callbackPort.id.toString()
                     },
                 ),
                 listOf(
                     InlineKeyboardButton().also {
-                        it.text = "◀\uFE0FНазад"
+                        it.text = "\uD83D\uDCDD Обновить проперти"
+                        it.callbackData = callbackUpdProperty.id.toString()
+                    },
+                ),
+                listOf(
+                    InlineKeyboardButton().also {
+                        it.text = "◀\uFE0F Назад"
                         it.callbackData = callbackBack.id.toString()
                     },
                 ),
@@ -447,6 +542,26 @@ class ManageProfilesFetcher(
     private fun createKeyboard(keyboard: List<List<InlineKeyboardButton>>) =
         InlineKeyboardMarkup().also { it.keyboard = keyboard }
 
+    /**
+     * Создает кнопку для возврата к консоли профиля
+     */
+    private fun cancelButton(
+        messageId: String,
+        profileName: String,
+        buttonText: String = "Отмена",
+    ): InlineKeyboardButton {
+        val callbackBack = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#profile|$profileName",
+            ),
+        )
+
+        return InlineKeyboardButton().also {
+            it.text = buttonText
+            it.callbackData = callbackBack.id.toString()
+        }
+    }
     private data class CallbackKeyboardStorage(
         private val store: MutableList<CallbackData> = mutableListOf(),
         var keyboard: List<List<InlineKeyboardButton>> = listOf(listOf()),

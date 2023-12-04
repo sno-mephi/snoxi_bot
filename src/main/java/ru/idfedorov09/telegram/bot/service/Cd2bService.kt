@@ -53,6 +53,18 @@ class Cd2bService {
         )
     }
 
+    fun uploadProperties(
+        profileName: String,
+        fileUrl: String,
+        errorStorage: MutableList<Cd2bError> = mutableListOf(),
+    ): ProfileResponse? {
+        return doPost(
+            errorStorage = errorStorage,
+            endpoint = "/upload_prop",
+            params = mapOf("profile_name" to profileName, "file_url" to fileUrl),
+        )
+    }
+
     private inline fun <reified T> doPost(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
         endpoint: String,
