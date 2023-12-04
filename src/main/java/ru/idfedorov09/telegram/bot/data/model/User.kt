@@ -1,9 +1,14 @@
 package ru.idfedorov09.telegram.bot.data.model
 
 import jakarta.persistence.*
+import org.hibernate.annotations.Immutable
+import org.hibernate.annotations.Subselect
+import org.hibernate.annotations.Synchronize
 
 @Entity
-@Table(name = "users_table")
+@Immutable
+@Subselect("SELECT * FROM users_table")
+@Synchronize("users_table")
 data class User(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

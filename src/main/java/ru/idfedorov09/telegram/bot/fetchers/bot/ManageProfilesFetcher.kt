@@ -1,5 +1,7 @@
 package ru.idfedorov09.telegram.bot.fetchers.bot
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import org.springframework.stereotype.Component
 import org.telegram.telegrambots.meta.api.methods.ParseMode
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage
@@ -9,8 +11,8 @@ import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
-import ru.idfedorov09.telegram.bot.data.enums.UserActionType.SENDING_PROPERTIES
-import ru.idfedorov09.telegram.bot.data.enums.UserActionType.TYPING_PORT
+import ru.idfedorov09.telegram.bot.data.enums.UserActionType
+import ru.idfedorov09.telegram.bot.data.enums.UserActionType.*
 import ru.idfedorov09.telegram.bot.data.model.CallbackData
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
@@ -69,6 +71,8 @@ class ManageProfilesFetcher(
         when {
             userActualizedInfo.currentActionType == TYPING_PORT &&
                 !TextCommands.isTextCommand(text) -> setPort(update, userActualizedInfo, text)
+            userActualizedInfo.currentActionType == UserActionType.CONFIRM_REMOVE_PROFILE &&
+                !TextCommands.isTextCommand(text) -> removeProfile(update, userActualizedInfo, text)
             text == TextCommands.MANAGE_PROFILES.commandText -> buildConsole(userActualizedInfo.tui)
         }
     }
@@ -109,8 +113,143 @@ class ManageProfilesFetcher(
                     resetUserData(userActualizedInfo, removeConsole = false)
                     clickUpdateProperties(update, userActualizedInfo, callbackData)
                 }
+                startsWith("#rm_profile") -> {
+                    resetUserData(userActualizedInfo, removeConsole = false)
+                    confirmRemoveProfile(update, userActualizedInfo, callbackData)
+                }
             }
         }
+    }
+
+    private fun removeProfile(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        text: String,
+    ) {
+        val data = userActualizedInfo.data ?: return
+
+        val profileName = data.split("|")[0]
+        val messageId = data.split("|")[1]
+
+        bot.execute(
+            DeleteMessage().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = update.message.messageId
+            },
+        )
+
+        if (text != profileName) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "❌ Неверное название профиля. Твое действие будет отменено."
+                },
+            )
+            resetUserData(userActualizedInfo, removeConsole = false)
+            // делаем паузу чтобы юзер увидел сообщение
+            runBlocking { delay(2000) }
+
+            showProfileInfo(
+                profileName,
+                messageId,
+                userActualizedInfo.tui,
+            )
+            return
+        }
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId.toInt()
+                it.text = "Пробую удалить профиль..."
+            },
+        )
+
+        val errorStorage = mutableListOf<Cd2bError>()
+        cd2bService.removeProfile(
+            profileName,
+            errorStorage,
+        )
+
+        resetUserData(userActualizedInfo, removeConsole = false)
+
+        if (errorStorage.any { it.statusCode != 200 }) {
+            val cancelButton = cancelButton(
+                messageId,
+                profileName,
+                "К настройкам профиля",
+            )
+
+            val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "❌ Ошибка сервера"
+                    it.replyMarkup = keyboard
+                },
+            )
+        } else {
+            val callbackBack = callbackDataRepository.save(
+                CallbackData(
+                    messageId = messageId,
+                    callbackData = "#back_to_list",
+                ),
+            )
+
+            val keyboard = createKeyboard(
+                listOf(
+                    listOf(
+                        InlineKeyboardButton().also {
+                            it.text = "Ко всем профилям"
+                            it.callbackData = callbackBack.id.toString()
+                        },
+                    ),
+                ),
+            )
+
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "✅\uD83D\uDDD1 _Профиль_ `$profileName` _успешно удален._"
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = keyboard
+                },
+            )
+        }
+    }
+    private fun confirmRemoveProfile(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
+    ) {
+        val profileName = callbackData.callbackData?.split("|")?.last() ?: return
+        val messageId = update.callbackQuery.message.messageId
+
+        val cancelButton = cancelButton(
+            messageId.toString(),
+            profileName,
+        )
+
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        userActualizedInfo.currentActionType = CONFIRM_REMOVE_PROFILE
+        userActualizedInfo.data = "$profileName|$messageId"
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId
+                it.text = "‼\uFE0F_Ты собираешься_ *удалить* _профиль ${profileName}_.\n\n" +
+                    "Это потенциально деструктивное действие. " +
+                    "Пожалуйста, подтверди его, написав следующим сообщением название профиля."
+                it.replyMarkup = keyboard
+                it.parseMode = ParseMode.MARKDOWN
+            },
+        )
     }
 
     private fun clickUpdateProperties(
@@ -379,9 +518,14 @@ class ManageProfilesFetcher(
                 callbackData = "#upd_prop|$profileName",
             ),
         )
+        val callbackRemove = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#rm_profile|$profileName",
+            ),
+        )
 
         // TODO: добавить кнопки:
-        // - удалить
         // - запустить/перезапустить
 
         val keyboard = createKeyboard(
@@ -396,6 +540,12 @@ class ManageProfilesFetcher(
                     InlineKeyboardButton().also {
                         it.text = "\uD83D\uDCDD Обновить проперти"
                         it.callbackData = callbackUpdProperty.id.toString()
+                    },
+                ),
+                listOf(
+                    InlineKeyboardButton().also {
+                        it.text = "❌ Удалить профиль"
+                        it.callbackData = callbackRemove.id.toString()
                     },
                 ),
                 listOf(
@@ -466,7 +616,7 @@ class ManageProfilesFetcher(
                     val desc = "${error?.statusDescription}".markdownFormat()
                     val trace = "${error?.stackTrace}".markdownFormat()
 
-                    val text = "❗\uFE0FОбнаружен инцидент\\. Сервис cd2b вернул код `$statusCode`.\n" +
+                    val text = "❗\uFE0FОбнаружен инцидент\\. Сервис cd2b вернул код `$statusCode`\\.\n" +
                         "Описание: `$desc`\n" +
                         "Трасса:\n```\n$trace"
                             .shortMessage(4096 - 3)
