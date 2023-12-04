@@ -5,4 +5,5 @@ enum class UserActionType {
 
     TYPING_PORT,
     SENDING_PROPERTIES,
+    CONFIRM_REMOVE_PROFILE,
 }

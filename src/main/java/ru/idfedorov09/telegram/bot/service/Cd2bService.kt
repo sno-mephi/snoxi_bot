@@ -65,6 +65,17 @@ class Cd2bService {
         )
     }
 
+    fun removeProfile(
+        profileName: String,
+        errorStorage: MutableList<Cd2bError> = mutableListOf(),
+    ): ProfileResponse? {
+        return doPost(
+            errorStorage = errorStorage,
+            endpoint = "/remove",
+            params = mapOf("profile_name" to profileName),
+        )
+    }
+
     private inline fun <reified T> doPost(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
         endpoint: String,
