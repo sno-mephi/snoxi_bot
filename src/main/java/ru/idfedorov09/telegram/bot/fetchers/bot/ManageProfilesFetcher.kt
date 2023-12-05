@@ -498,7 +498,8 @@ class ManageProfilesFetcher(
             "✏\uFE0FИмя приложения: [${profileResponse.repoName}]($repoUrl)\n" +
             "$isRunningText\n" +
             "\uD83D\uDCF6Активный порт: ${profileResponse.port}\n" +
-            "\uD83D\uDCE6Имя Docker-image: $imageName"
+            "\uD83D\uDCE6Имя Docker-image: $imageName\n" +
+            "\uD83D\uDCC4[Логи](${cd2bService.url()}/logs/${profileResponse.imageName})"
 
         val callbackBack = callbackDataRepository.save(
             CallbackData(
