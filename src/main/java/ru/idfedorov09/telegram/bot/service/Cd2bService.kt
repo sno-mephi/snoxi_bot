@@ -9,10 +9,12 @@ import io.ktor.client.statement.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
 import java.net.ConnectException
+import java.net.URL
 
 @Service
 class Cd2bService {
@@ -23,12 +25,19 @@ class Cd2bService {
         }
     }
 
-    // TODO: настроить адрес cd2b
+    @Value("\${cd2b.host:127.0.0.1}")
+    private lateinit var cd2bHost: String
+
+    @Value("\${cd2b.port:8000}")
+    private var cd2bPort: Int = 8000
+
     fun getAllProfiles(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
     ): List<ProfileResponse>? {
         return doPost(errorStorage, "/all_profiles")
     }
+
+    fun url() = URL("http", cd2bHost, cd2bPort, "").toString()
 
     fun checkProfile(
         profileName: String,
@@ -84,7 +93,7 @@ class Cd2bService {
         val response: T? =
             runBlocking {
                 try {
-                    val response = client.post("http://127.0.0.1:8000/${endpoint.removePrefix("/")}") {
+                    val response = client.post("${url()}/${endpoint.removePrefix("/")}") {
                         params.forEach {
                             parameter(it.key, it.value)
                         }
