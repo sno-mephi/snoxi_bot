@@ -20,4 +20,7 @@ data class ProfileResponse(
 
     @SerialName("is_running")
     val isRunning: Boolean,
+
+    @SerialName("has_properties")
+    val hasProperties: Boolean
 )
