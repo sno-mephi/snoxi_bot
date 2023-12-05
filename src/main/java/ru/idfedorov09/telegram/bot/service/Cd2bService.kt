@@ -4,6 +4,7 @@ import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.websocket.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.serialization.kotlinx.json.*
@@ -23,6 +24,7 @@ class Cd2bService {
         install(ContentNegotiation) {
             json()
         }
+        install(WebSockets)
     }
 
     @Value("\${cd2b.host:127.0.0.1}")
