@@ -11,7 +11,6 @@ import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
-import ru.idfedorov09.telegram.bot.data.enums.UserActionType
 import ru.idfedorov09.telegram.bot.data.enums.UserActionType.*
 import ru.idfedorov09.telegram.bot.data.model.CallbackData
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
@@ -71,7 +70,7 @@ class ManageProfilesFetcher(
         when {
             userActualizedInfo.currentActionType == TYPING_PORT &&
                 !TextCommands.isTextCommand(text) -> setPort(update, userActualizedInfo, text)
-            userActualizedInfo.currentActionType == UserActionType.CONFIRM_REMOVE_PROFILE &&
+            userActualizedInfo.currentActionType == CONFIRM_REMOVE_PROFILE &&
                 !TextCommands.isTextCommand(text) -> removeProfile(update, userActualizedInfo, text)
             text == TextCommands.MANAGE_PROFILES.commandText -> buildConsole(userActualizedInfo.tui)
         }
@@ -117,7 +116,63 @@ class ManageProfilesFetcher(
                     resetUserData(userActualizedInfo, removeConsole = false)
                     confirmRemoveProfile(update, userActualizedInfo, callbackData)
                 }
+                // TODO("нуждается в подтверждении???")
+                // TODO: прикрутить хэши коммитов для понимания че и где
+                startsWith("#rerun_upd") -> {
+                    resetUserData(userActualizedInfo, removeConsole = false)
+                    TODO()
+                }
+                startsWith("#rerun_wupd") -> {
+                    resetUserData(userActualizedInfo, removeConsole = false)
+                    TODO()
+                }
+                startsWith("#stop") -> {
+                    resetUserData(userActualizedInfo, removeConsole = false)
+                    stopProfile(update, userActualizedInfo, callbackData)
+                }
             }
+        }
+    }
+
+    private fun stopProfile(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
+    ) {
+        val messageId = callbackData.messageId ?: return
+        val profileName = callbackData.callbackData?.split("|")?.last() ?: return
+
+        val errorStorage = mutableListOf<Cd2bError>()
+        val profileResponse = cd2bService.stopProfile(
+            profileName,
+            errorStorage,
+        )
+
+        val cancelButton = cancelButton(
+            messageId,
+            profileName,
+            "К настройкам профиля",
+        )
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        if (errorStorage.any { it.statusCode != 200 } || profileResponse?.isRunning == true) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "❌ Ошибка сервера"
+                    it.replyMarkup = keyboard
+                },
+            )
+        } else {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "⛔\uFE0F Профиль $profileName остановлен."
+                    it.replyMarkup = keyboard
+                },
+            )
         }
     }
 

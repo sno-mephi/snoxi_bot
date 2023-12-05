@@ -87,6 +87,17 @@ class Cd2bService {
         )
     }
 
+    fun stopProfile(
+        profileName: String,
+        errorStorage: MutableList<Cd2bError> = mutableListOf(),
+    ): ProfileResponse? {
+        return doPost(
+            errorStorage = errorStorage,
+            endpoint = "/stop",
+            params = mapOf("profile_name" to profileName),
+        )
+    }
+
     private inline fun <reified T> doPost(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
         endpoint: String,
