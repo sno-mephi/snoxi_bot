@@ -526,10 +526,8 @@ class ManageProfilesFetcher(
             ),
         )
 
-        // TODO: добавить кнопки:
-        // - запустить/перезапустить
-
-        val keyboard = createKeyboard(
+        val buttons = createRunOrRerunButton(profileResponse, messageId).chunked(1).toMutableList()
+        buttons.addAll(
             listOf(
                 listOf(
                     InlineKeyboardButton().also {
@@ -558,6 +556,8 @@ class ManageProfilesFetcher(
             ),
         )
 
+        val keyboard = createKeyboard(buttons)
+
         bot.execute(
             EditMessageText().also {
                 it.chatId = chatId
@@ -567,6 +567,71 @@ class ManageProfilesFetcher(
                 it.parseMode = ParseMode.MARKDOWN
             },
         )
+    }
+
+    private fun createRunOrRerunButton(
+        profileResponse: ProfileResponse,
+        messageId: String,
+    ): List<InlineKeyboardButton> {
+        val buttons = mutableListOf<InlineKeyboardButton>()
+
+        // если пропертей нет то не рисуем кнопки для запуска
+        if (!profileResponse.hasProperties) return buttons
+
+        val callbackRerunWithUpd = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#rerun_upd|${profileResponse.name}",
+            ),
+        )
+        val callbackRerunWithoutUpd = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#rerun_wupd|${profileResponse.name}",
+            ),
+        )
+
+        if (profileResponse.isRunning) {
+            val callbackStop = callbackDataRepository.save(
+                CallbackData(
+                    messageId = messageId,
+                    callbackData = "#stop|${profileResponse.name}",
+                ),
+            )
+
+            buttons.add(
+                InlineKeyboardButton().also {
+                    it.text = "\uD83D\uDFE2 Перезапуск без обновы"
+                    it.callbackData = callbackRerunWithoutUpd.id.toString()
+                },
+            )
+            buttons.add(
+                InlineKeyboardButton().also {
+                    it.text = "\uD83D\uDFE0 Перезапуск с обновой"
+                    it.callbackData = callbackRerunWithUpd.id.toString()
+                },
+            )
+            buttons.add(
+                InlineKeyboardButton().also {
+                    it.text = "\uD83D\uDD34 Выключить"
+                    it.callbackData = callbackStop.id.toString()
+                },
+            )
+        } else {
+            buttons.add(
+                InlineKeyboardButton().also {
+                    it.text = "\uD83D\uDFE2 Запуск без обновы"
+                    it.callbackData = callbackRerunWithoutUpd.id.toString()
+                },
+            )
+            buttons.add(
+                InlineKeyboardButton().also {
+                    it.text = "\uD83D\uDFE0 Запуск с обновой"
+                    it.callbackData = callbackRerunWithUpd.id.toString()
+                },
+            )
+        }
+        return buttons
     }
 
     /**
