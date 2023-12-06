@@ -7,12 +7,17 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import io.ktor.websocket.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
+import ru.idfedorov09.telegram.bot.data.model.ProfileBuildMessageResponse
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
 import java.net.ConnectException
 import java.net.URL
@@ -96,6 +101,38 @@ class Cd2bService {
             endpoint = "/stop",
             params = mapOf("profile_name" to profileName),
         )
+    }
+
+    /**
+     * По вебсокету перезапускает профиль с указанными настройками.
+     * При получении обновления от сервера выполняет метод receiveTextAction
+     */
+    fun rerunProfile(
+        profileName: String,
+        externalPort: Int = -1,
+        shouldRebuild: Boolean = true,
+        receiveTextAction: (ProfileBuildMessageResponse?, Boolean) -> Unit = { _, _ -> },
+    ) {
+        runBlocking {
+            client.webSocket(
+                method = HttpMethod.Get,
+                host = cd2bHost,
+                port = cd2bPort,
+                path = "/rerun?profile_name=$profileName&external_port=$externalPort&rebuild=$shouldRebuild",
+            ) {
+                while (true) {
+                    val receive = incoming.receiveCatching()
+                    if (receive.isClosed || receive.isFailure) {
+                        receiveTextAction(null, true)
+                        break
+                    }
+                    val receivedText = (receive.getOrNull() as? Frame.Text)?.readText() ?: continue
+
+                    val response: ProfileBuildMessageResponse = Json.decodeFromString(receivedText)
+                    receiveTextAction(response, false)
+                }
+            }
+        }
     }
 
     private inline fun <reified T> doPost(
