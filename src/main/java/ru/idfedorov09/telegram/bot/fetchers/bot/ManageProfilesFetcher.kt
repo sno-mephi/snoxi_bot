@@ -10,20 +10,22 @@ import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageTe
 import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.MAX_MSG_LENGTH
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
 import ru.idfedorov09.telegram.bot.data.enums.UserActionType.*
-import ru.idfedorov09.telegram.bot.data.model.CallbackData
-import ru.idfedorov09.telegram.bot.data.model.Cd2bError
-import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
-import ru.idfedorov09.telegram.bot.data.model.UserActualizedInfo
+import ru.idfedorov09.telegram.bot.data.model.*
 import ru.idfedorov09.telegram.bot.executor.Executor
 import ru.idfedorov09.telegram.bot.repo.CallbackDataRepository
 import ru.idfedorov09.telegram.bot.service.Cd2bService
+import ru.idfedorov09.telegram.bot.service.RedisService
 import ru.idfedorov09.telegram.bot.util.MessageUtils.markdownFormat
 import ru.idfedorov09.telegram.bot.util.MessageUtils.shortMessage
 import ru.idfedorov09.telegram.bot.util.UpdatesUtil
 import ru.mephi.sno.libs.flow.belly.InjectData
 import ru.mephi.sno.libs.flow.fetcher.GeneralFetcher
+import java.time.Duration
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * Фетчер для управления профилями
@@ -34,6 +36,7 @@ class ManageProfilesFetcher(
     private val updatesUtil: UpdatesUtil,
     private val bot: Executor,
     private val cd2bService: Cd2bService,
+    private val redisService: RedisService,
 ) : GeneralFetcher() {
 
     @InjectData
@@ -120,11 +123,21 @@ class ManageProfilesFetcher(
                 // TODO: прикрутить хэши коммитов для понимания че и где
                 startsWith("#rerun_upd") -> {
                     resetUserData(userActualizedInfo, removeConsole = false)
-                    TODO()
+                    rerunProfile(
+                        update = update,
+                        userActualizedInfo = userActualizedInfo,
+                        callbackData = callbackData,
+                        withUpdate = true,
+                    )
                 }
                 startsWith("#rerun_wupd") -> {
                     resetUserData(userActualizedInfo, removeConsole = false)
-                    TODO()
+                    rerunProfile(
+                        update = update,
+                        userActualizedInfo = userActualizedInfo,
+                        callbackData = callbackData,
+                        withUpdate = false,
+                    )
                 }
                 startsWith("#stop") -> {
                     resetUserData(userActualizedInfo, removeConsole = false)
@@ -132,6 +145,85 @@ class ManageProfilesFetcher(
                 }
             }
         }
+    }
+
+    private fun rerunProfile(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
+        withUpdate: Boolean,
+        logsLimit: Int = 15,
+        pingInterval: Long = 2,
+    ) {
+        val messageId = callbackData.messageId ?: return
+        val profileName = callbackData.callbackData?.split("|")?.last() ?: return
+        val buildLogs = mutableListOf<String>()
+
+        cd2bService.rerunProfile(
+            profileName = profileName,
+            shouldRebuild = withUpdate,
+        ) { response, isClose ->
+            response ?: run {
+                if (!isClose) return@rerunProfile
+            }
+
+            if (response?.isNewLine == false) buildLogs.removeLast()
+            response?.message?.let { buildLogs.add(it) }
+
+            if (buildLogs.size > logsLimit) {
+                buildLogs.removeFirstOrNull()
+            }
+
+            val logsMessage = buildLogs
+                .joinToString { it.plus("\n") }
+                .removePrefix("\n")
+                .markdownFormat()
+
+            val text = "\uD83D\uDEE0 Собираю образ контейнера для профиля `$profileName`\\, " +
+                "придется подождать\\.\n" +
+                "Чтобы тебе было спокойнее\\, вот логи сборки\\:\n\n" +
+                "```$logsMessage".shortMessage(MAX_MSG_LENGTH - 3)
+                    .plus("```")
+
+            val dateKey = "dateKey_$profileName"
+            val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+            val cur = LocalDateTime.now()
+            val last = redisService.getSafe(dateKey)?.let {
+                LocalDateTime.parse(it, formatter)
+            }
+
+            if (last == null || Duration.between(last, cur).seconds > pingInterval || isClose) {
+                bot.execute(
+                    EditMessageText().also {
+                        it.messageId = messageId.toInt()
+                        it.chatId = userActualizedInfo.tui
+                        it.text = text
+                        it.parseMode = ParseMode.MARKDOWNV2
+                    },
+                )
+                redisService.setValue(
+                    dateKey,
+                    LocalDateTime.now().format(formatter),
+                )
+            }
+        }
+
+        val cancelButton = cancelButton(
+            messageId,
+            profileName,
+            "К настройкам профиля",
+        )
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        bot.execute(
+            EditMessageText().also {
+                it.messageId = messageId.toInt()
+                it.chatId = userActualizedInfo.tui
+                it.text = "✅ Профиль успешно собран и запущен."
+                it.replyMarkup = keyboard
+            },
+        )
     }
 
     private fun stopProfile(
