@@ -22,5 +22,8 @@ data class ProfileResponse(
     val isRunning: Boolean,
 
     @SerialName("has_properties")
-    val hasProperties: Boolean
+    val hasProperties: Boolean,
+
+    @SerialName("properties_content")
+    val propertyContent: String?,
 )
