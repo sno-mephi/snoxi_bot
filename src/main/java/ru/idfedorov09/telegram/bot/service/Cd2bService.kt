@@ -194,6 +194,13 @@ class Cd2bService {
                     stackTrace = e.stackTraceToString(),
                 ).addTo(errorsList)
             }
+            else -> {
+                Cd2bError(
+                    statusCode = -666,
+                    statusDescription = "Unknown error",
+                    stackTrace = e.stackTraceToString(),
+                ).addTo(errorsList)
+            }
         }
 
         return errorsList

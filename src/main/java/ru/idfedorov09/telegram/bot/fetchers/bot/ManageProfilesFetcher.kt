@@ -673,6 +673,20 @@ class ManageProfilesFetcher(
             ),
         )
 
+        // TODO: сделать рабочей кнопкой
+        val propertyContentButton = if (profileResponse.hasProperties) {
+            val callbackProp = callbackDataRepository.save(
+                CallbackData(
+                    messageId = messageId,
+                    callbackData = "#show_prop|$profileName",
+                ),
+            )
+            InlineKeyboardButton().also {
+                it.text = "\uD83D\uDD16 Показать проперти"
+                it.callbackData = callbackProp.id.toString()
+            }
+        } else { null }
+
         val buttons = createRunOrRerunButton(profileResponse, messageId).chunked(1).toMutableList()
         buttons.addAll(
             listOf(
@@ -694,12 +708,19 @@ class ManageProfilesFetcher(
                         it.callbackData = callbackRemove.id.toString()
                     },
                 ),
-                listOf(
-                    InlineKeyboardButton().also {
-                        it.text = "◀\uFE0F Назад"
-                        it.callbackData = callbackBack.id.toString()
-                    },
-                ),
+            ),
+        )
+
+        propertyContentButton?.let {
+            buttons.add(listOf(it))
+        }
+
+        buttons.add(
+            listOf(
+                InlineKeyboardButton().also {
+                    it.text = "◀\uFE0F Назад"
+                    it.callbackData = callbackBack.id.toString()
+                },
             ),
         )
 
