@@ -1,5 +1,6 @@
 package ru.idfedorov09.telegram.bot.fetchers.bot
 
+import io.ktor.websocket.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.springframework.stereotype.Component
@@ -12,6 +13,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.MAX_MSG_LENGTH
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
+import ru.idfedorov09.telegram.bot.data.enums.UserActionType
 import ru.idfedorov09.telegram.bot.data.enums.UserActionType.*
 import ru.idfedorov09.telegram.bot.data.model.*
 import ru.idfedorov09.telegram.bot.executor.Executor
@@ -44,11 +46,11 @@ class ManageProfilesFetcher(
         update: Update,
         userActualizedInfo: UserActualizedInfo,
     ) {
-        val text = updatesUtil.getText(update) ?: ""
+        val text = runCatching { update.message.text }.getOrNull()
 
         when {
             update.hasCallbackQuery() -> handleButtons(update, userActualizedInfo)
-            update.hasMessage() && update.message.hasText() -> handleText(update, userActualizedInfo, text)
+            update.hasMessage() && update.message.hasText() -> handleText(update, userActualizedInfo, text!!)
             update.hasMessage() && update.message.hasDocument() -> handeDocs(update, userActualizedInfo)
         }
     }
@@ -70,11 +72,13 @@ class ManageProfilesFetcher(
         userActualizedInfo: UserActualizedInfo,
         text: String,
     ) {
+        val someAction = { actionType: UserActionType ->
+            userActualizedInfo.currentActionType == actionType && !TextCommands.isTextCommand(text)
+        }
         when {
-            userActualizedInfo.currentActionType == TYPING_PORT &&
-                !TextCommands.isTextCommand(text) -> setPort(update, userActualizedInfo, text)
-            userActualizedInfo.currentActionType == CONFIRM_REMOVE_PROFILE &&
-                !TextCommands.isTextCommand(text) -> removeProfile(update, userActualizedInfo, text)
+            someAction(TYPING_PORT) -> setPort(update, userActualizedInfo, text)
+            someAction(CONFIRM_REMOVE_PROFILE) -> removeProfile(update, userActualizedInfo, text)
+            someAction(TYPING_PROPERTY_KEY_VALUE) -> updatePropertyField(update, userActualizedInfo, text)
             text == TextCommands.MANAGE_PROFILES.commandText -> buildConsole(userActualizedInfo.tui)
         }
     }
@@ -147,8 +151,117 @@ class ManageProfilesFetcher(
                     resetUserData(userActualizedInfo, removeConsole = false)
                     showPropertyMenu(update, userActualizedInfo, callbackData)
                 }
+                startsWith("#in_prop_upd_field") -> {
+                    resetUserData(userActualizedInfo, removeConsole = false)
+                    clickUpdatePropertyField(update, userActualizedInfo, callbackData)
+                }
             }
         }
+    }
+
+    private fun updatePropertyField(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        text: String,
+    ) {
+        val data = userActualizedInfo.data ?: return
+        val profileName = data.split("|")[0]
+        val messageId = data.split("|")[1]
+
+        bot.execute(
+            DeleteMessage().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = update.message.messageId
+            },
+        )
+
+        if (text.trim().split("=").size != 2) {
+            val cancelButton = cancelButton(
+                messageId,
+                profileName,
+            )
+            val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "❌ Неверный формат, попробуй еще раз. \n" +
+                        "Отправь мне настройку вида: ```\nsome.key=some_value\n```\n"
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = keyboard
+                },
+            )
+            return
+        }
+
+        val cancelButton = cancelButton(
+            messageId,
+            profileName,
+            "К настройкам профиля",
+        )
+
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        val key = text.trim().split("=")[0]
+        val value = text.trim().split("=")[1]
+
+        val errorStorage = mutableListOf<Cd2bError>()
+        cd2bService.changePropertiesField(profileName, key, value, errorStorage)
+        if (errorStorage.any { it.statusCode != 200 }) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "❌ Ошибка сервера или неверный формат. Попробуй еще раз. \n" +
+                        "Отправь мне настройку вида: ```\nsome.key=some_value\n```"
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = keyboard
+                },
+            )
+        } else {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "✅ Успешно обновлено / добавлено следующее свойство:```\n" +
+                        "$key=$value\n```"
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = keyboard
+                },
+            )
+            resetUserData(userActualizedInfo, removeConsole = false)
+        }
+    }
+    private fun clickUpdatePropertyField(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
+    ) {
+        val messageId = callbackData.messageId ?: return
+        val profileName = callbackData.callbackData?.split("|")?.last() ?: return
+
+        val cancelButton = cancelButton(
+            messageId,
+            profileName,
+            "К настройкам профиля",
+        )
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId.toInt()
+                it.text = "_Ты собираешься добавить/изменить проперти профиля_ `$profileName`.\n\n" +
+                    "Следующим сообщением отправь мне настройку вида: ```\nsome.key=some_value\n```\n" +
+                    "Если соответствующий ключ уже есть, он будет обновлен, если нет - свойство будет создано."
+                it.parseMode = ParseMode.MARKDOWN
+                it.replyMarkup = keyboard
+            },
+        )
+
+        userActualizedInfo.currentActionType = TYPING_PROPERTY_KEY_VALUE
+        userActualizedInfo.data = "$profileName|$messageId"
     }
 
     private fun showPropertyMenu(
@@ -166,7 +279,24 @@ class ManageProfilesFetcher(
             "К настройкам профиля",
         )
 
-        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+        val callbackUpdPropertyField = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#in_prop_upd_field|$profileName",
+            ),
+        )
+
+        val keyboard = createKeyboard(
+            listOf(
+                listOf(
+                    InlineKeyboardButton().also {
+                        it.text = "Добавить/изменить свойство"
+                        it.callbackData = callbackUpdPropertyField.id.toString()
+                    },
+                ),
+                listOf(cancelButton),
+            ),
+        )
 
         val properties = profileResponse.propertyContent
             ?.split("\n")
@@ -197,11 +327,13 @@ class ManageProfilesFetcher(
         val messageId = callbackData.messageId ?: return
         val profileName = callbackData.callbackData?.split("|")?.last() ?: return
         val buildLogs = mutableListOf<String>()
+        lateinit var closeStatus: CloseReason
 
         cd2bService.rerunProfile(
             profileName = profileName,
             shouldRebuild = withUpdate,
-        ) { response, isClose ->
+        ) { response, isClose, closeReason ->
+            closeReason?.let { closeStatus = closeReason }
             response ?: run {
                 if (!isClose) return@rerunProfile
             }
@@ -214,14 +346,14 @@ class ManageProfilesFetcher(
             }
 
             val logsMessage = buildLogs
-                .joinToString { it.plus("\n") }
+                .joinToString(separator = "\n") { it }
                 .removePrefix("\n")
                 .markdownFormat()
 
             val text = "\uD83D\uDEE0 Собираю образ контейнера для профиля `$profileName`\\, " +
                 "придется подождать\\.\n" +
                 "Чтобы тебе было спокойнее\\, вот логи сборки\\:\n\n" +
-                "```$logsMessage".shortMessage(MAX_MSG_LENGTH - 3)
+                "```Docker\n$logsMessage".shortMessage(MAX_MSG_LENGTH - 3)
                     .plus("```")
 
             val dateKey = "dateKey_$profileName"
@@ -248,6 +380,15 @@ class ManageProfilesFetcher(
             }
         }
 
+        runBlocking { delay(2000) }
+
+        val textMessage = if (closeStatus.code.toInt() == 1000) {
+            "✅ Профиль успешно собран и запущен."
+        } else {
+            "❌ Ошибка запуска или сборки.\nУбедись, что ранее ты запускал профиль со сборкой. " +
+                "Если запускал - попробуй запустить локально, так станет понятнее, в чем проблема ;)"
+        }
+
         val cancelButton = cancelButton(
             messageId,
             profileName,
@@ -259,7 +400,7 @@ class ManageProfilesFetcher(
             EditMessageText().also {
                 it.messageId = messageId.toInt()
                 it.chatId = userActualizedInfo.tui
-                it.text = "✅ Профиль успешно собран и запущен."
+                it.text = textMessage
                 it.replyMarkup = keyboard
             },
         )
