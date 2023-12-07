@@ -143,8 +143,47 @@ class ManageProfilesFetcher(
                     resetUserData(userActualizedInfo, removeConsole = false)
                     stopProfile(update, userActualizedInfo, callbackData)
                 }
+                startsWith("#show_prop") -> {
+                    resetUserData(userActualizedInfo, removeConsole = false)
+                    showPropertyMenu(update, userActualizedInfo, callbackData)
+                }
             }
         }
+    }
+
+    private fun showPropertyMenu(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
+    ) {
+        val messageId = callbackData.messageId ?: return
+        val profileName = callbackData.callbackData?.split("|")?.last() ?: return
+        val profileResponse = cd2bService.checkProfile(profileName) ?: return
+
+        val cancelButton = cancelButton(
+            messageId,
+            profileName,
+            "К настройкам профиля",
+        )
+
+        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+        val properties = profileResponse.propertyContent
+            ?.split("\n")
+            ?.filter { !(it.trim().startsWith("#") || it.trim() == "") }
+            ?.joinToString(separator = "\n") { it.trim() }
+            ?.removeSuffix("\n")
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId.toInt()
+                it.text = "✏\uFE0F Проперти профиля `$profileName`:```application.properties\n" +
+                    "$properties\n```"
+                it.parseMode = ParseMode.MARKDOWN
+                it.replyMarkup = keyboard
+            },
+        )
     }
 
     private fun rerunProfile(
@@ -464,30 +503,40 @@ class ManageProfilesFetcher(
             errorStorage,
         )
 
-        val cancelButton = cancelButton(
-            messageId,
-            profileName,
-        )
-        val keyboard = createKeyboard(listOf(listOf(cancelButton)))
-
         if (errorStorage.any { it.statusCode != 200 }) {
+            val cancelButton = cancelButton(
+                messageId,
+                profileName,
+            )
+            val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
             bot.execute(
                 EditMessageText().also {
                     it.chatId = userActualizedInfo.tui
                     it.messageId = messageId.toInt()
-                    it.text = "Произошла ошибка сервера. Попробуйте загрузить файл еще раз."
+                    it.text = "Не могу обновить проперти. Возможно, формат твоего файла неверный"
                     it.replyMarkup = keyboard
                 },
             )
         } else {
-            showProfileInfo(
-                profileName = profileName,
-                messageId = messageId,
-                chatId = userActualizedInfo.tui,
-            )
-
             userActualizedInfo.currentActionType = null
             userActualizedInfo.data = null
+
+            val cancelButton = cancelButton(
+                messageId,
+                profileName,
+                "К настройкам профиля",
+            )
+            val keyboard = createKeyboard(listOf(listOf(cancelButton)))
+
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "✅ Проперти успешно обновлены. Не забудь перезагрузить профиль \uD83D\uDE09"
+                    it.replyMarkup = keyboard
+                },
+            )
         }
     }
 
@@ -673,7 +722,6 @@ class ManageProfilesFetcher(
             ),
         )
 
-        // TODO: сделать рабочей кнопкой
         val propertyContentButton = if (profileResponse.hasProperties) {
             val callbackProp = callbackDataRepository.save(
                 CallbackData(
