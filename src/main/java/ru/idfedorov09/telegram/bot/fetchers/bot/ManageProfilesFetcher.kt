@@ -28,6 +28,7 @@ import ru.mephi.sno.libs.flow.fetcher.GeneralFetcher
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.regex.Pattern
 
 /**
  * Фетчер для управления профилями
@@ -79,6 +80,9 @@ class ManageProfilesFetcher(
             someAction(TYPING_PORT) -> setPort(update, userActualizedInfo, text)
             someAction(CONFIRM_REMOVE_PROFILE) -> removeProfile(update, userActualizedInfo, text)
             someAction(TYPING_PROPERTY_KEY_VALUE) -> updatePropertyField(update, userActualizedInfo, text)
+            someAction(TYPING_PROFILE_NAME) -> validateNewProfileNameAndNext(update, userActualizedInfo, text)
+            someAction(TYPING_PROFILE_REPO_URL) -> validateNewProfileRepoLink(update, userActualizedInfo, text)
+            someAction(TYPING_NEW_PROFILE_PORT) -> createNewProfileWithPortValidation(update, userActualizedInfo, text)
             text == TextCommands.MANAGE_PROFILES.commandText -> buildConsole(userActualizedInfo.tui)
         }
     }
@@ -98,7 +102,7 @@ class ManageProfilesFetcher(
             when {
                 startsWith("new profile") -> {
                     resetUserData(userActualizedInfo, removeConsole = false)
-                    newProfile()
+                    clickNewProfile(update, userActualizedInfo, callbackData)
                 }
                 startsWith("#profile") -> {
                     resetUserData(userActualizedInfo, removeConsole = false)
@@ -157,6 +161,250 @@ class ManageProfilesFetcher(
                 }
             }
         }
+    }
+
+    private fun createNewProfileWithPortValidation(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        text: String,
+    ) {
+        val consoleMessageId = userActualizedInfo.data!!.split("|")[0]
+        val profileName = userActualizedInfo.data!!.split("|")[1]
+        val githubLink = userActualizedInfo.data!!.split("|")[2]
+        val port = text.trim()
+
+        bot.execute(
+            DeleteMessage().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = update.message.messageId
+            },
+        )
+
+        val keyboard = { msg: String ->
+            val backButton = toProfilesListButton(
+                messageId = consoleMessageId,
+                buttonText = msg,
+            )
+            createKeyboard(listOf(listOf(backButton)))
+        }
+
+        if (!isValidPort(port)) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = consoleMessageId.toInt()
+                    it.text = "❌ Неправильный формат порта. Попробуй еще раз.\n\n" +
+                        "\uD83D\uDC40 *Обрати внимание*, что порт является целым числом из отрезка `[1; 65535]`"
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = keyboard("Отмена")
+                },
+            )
+            return
+        }
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = consoleMessageId.toInt()
+                it.text = "Пробую создать профиль..."
+            },
+        )
+
+        val errorStorage = mutableListOf<Cd2bError>()
+        cd2bService.createProfile(profileName, githubLink, port, errorStorage)
+
+        if (errorStorage.any { it.statusCode != 200 }) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = consoleMessageId.toInt()
+                    it.text = "❌ Ошибка сервера."
+                    it.replyMarkup = keyboard("Ко всем профилям")
+                },
+            )
+            resetUserData(userActualizedInfo, removeConsole = false)
+        } else {
+            val callbackBack = callbackDataRepository.save(
+                CallbackData(
+                    messageId = consoleMessageId,
+                    callbackData = "#back_to_list",
+                ),
+            )
+            val callbackToProfile = callbackDataRepository.save(
+                CallbackData(
+                    messageId = consoleMessageId,
+                    callbackData = "#profile|$profileName",
+                ),
+            )
+
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = consoleMessageId.toInt()
+                    it.text = "✅ Профиль `$profileName` успешно создан."
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = createKeyboard(
+                        listOf(
+                            listOf(
+                                InlineKeyboardButton().also {
+                                    it.text = "К настройкам профиля"
+                                    it.callbackData = callbackToProfile.id.toString()
+                                },
+                            ),
+                            listOf(
+                                InlineKeyboardButton().also {
+                                    it.text = "Ко всем профилям"
+                                    it.callbackData = callbackBack.id.toString()
+                                },
+                            ),
+                        ),
+                    )
+                },
+            )
+            resetUserData(userActualizedInfo, removeConsole = false)
+        }
+    }
+    private fun validateNewProfileRepoLink(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        text: String,
+    ) {
+        val consoleMessageId = userActualizedInfo.data!!.split("|")[0]
+        val profileName = userActualizedInfo.data!!.split("|")[1]
+        val githubLink = text.trim()
+
+        val backButton = toProfilesListButton(
+            messageId = consoleMessageId,
+            buttonText = "Отмена",
+        )
+        val keyboard = createKeyboard(listOf(listOf(backButton)))
+
+        bot.execute(
+            DeleteMessage().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = update.message.messageId
+            },
+        )
+
+        if (!isGitHubRepository(githubLink)) {
+            val githubHttpsDescLink = "https://docs.github.com/en/get-started/" +
+                "getting-started-with-git/about-remote-repositories"
+
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = consoleMessageId.toInt()
+                    it.text = "❌ Некорректный формат имени. Попробуй еще раз.\n\n" +
+                        "\uD83D\uDC40 *Обрати внимание*, что на текущий момент из VCS поддерживается " +
+                        "только [GitHub]($githubHttpsDescLink). Приватные репозитории " +
+                        "пока не поддерживаются."
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = keyboard
+                },
+            )
+            return
+        }
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = consoleMessageId.toInt()
+                it.text = "\uD83E\uDDBE _Ты создаешь новый профиль_ *$profileName*. " +
+                    "В следующем сообщении укажи порт, на котором будет работать приложение.\n\n" +
+                    "\uD83D\uDC40 *Обрати внимание*, что порт является целым числом из отрезка `[1; 65535]`"
+                it.parseMode = ParseMode.MARKDOWN
+                it.replyMarkup = keyboard
+            },
+        )
+
+        userActualizedInfo.currentActionType = TYPING_NEW_PROFILE_PORT
+        userActualizedInfo.data = "$consoleMessageId|$profileName|$githubLink"
+    }
+
+    private fun validateNewProfileNameAndNext(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        text: String,
+    ) {
+        val profileName = text.trim()
+        val messageId = userActualizedInfo.data ?: return
+        val backButton = toProfilesListButton(
+            messageId = messageId,
+            buttonText = "Отмена",
+        )
+
+        bot.execute(
+            DeleteMessage().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = update.message.messageId
+            },
+        )
+
+        val keyboard = createKeyboard(listOf(listOf(backButton)))
+
+        val regex = Regex("^[a-zA-Z_][a-zA-Z0-9_]{0,19}$")
+
+        if (!regex.matches(profileName)) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = userActualizedInfo.tui
+                    it.messageId = messageId.toInt()
+                    it.text = "❌ Неправильный формат имени. Попробуй еще раз.\n\n" +
+                        "\uD83D\uDC40 *Обрати внимание*, что имя должно содержать только латинские буквы, " +
+                        "цифры или символы подчеркивания, а также не должно начинаться с цифр. " +
+                        "Максимальная длина имени - 20 символов."
+                    it.parseMode = ParseMode.MARKDOWN
+                    it.replyMarkup = keyboard
+                },
+            )
+            return
+        }
+
+        val githubHttpsDescLink = "https://docs.github.com/en/get-started/" +
+            "getting-started-with-git/about-remote-repositories"
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = messageId.toInt()
+                it.text = "\uD83E\uDDBE _Ты создаешь новый профиль_ *$profileName*. " +
+                    "В следующем сообщении укажи https-ссылку на репозиторий.\n\n" +
+                    "\uD83D\uDC40 *Обрати внимание*, что на текущий момент из VCS поддерживается " +
+                    "только [GitHub]($githubHttpsDescLink). Приватные репозитории пока не поддерживаются."
+                it.parseMode = ParseMode.MARKDOWN
+                it.replyMarkup = keyboard
+            },
+        )
+
+        userActualizedInfo.currentActionType = TYPING_PROFILE_REPO_URL
+        userActualizedInfo.data = "$messageId|$profileName"
+    }
+    private fun clickNewProfile(
+        update: Update,
+        userActualizedInfo: UserActualizedInfo,
+        callbackData: CallbackData,
+    ) {
+        val backButton = toProfilesListButton(
+            messageId = update.callbackQuery.message.messageId.toString(),
+            buttonText = "Отмена",
+        )
+        val keyboard = createKeyboard(listOf(listOf(backButton)))
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = userActualizedInfo.tui
+                it.messageId = update.callbackQuery.message.messageId
+                it.text = "\uD83E\uDDBE _Ты создаешь новый профиль_. " +
+                    "В следующем сообщении укажи имя профиля.\n\n" +
+                    "\uD83D\uDC40 *Обрати внимание*, что имя должно содержать только латинские буквы, " +
+                    "цифры или символы подчеркивания, а также не должно начинаться с цифр. " +
+                    "Максимальная длина имени - 20 символов."
+                it.parseMode = ParseMode.MARKDOWN
+                it.replyMarkup = keyboard
+            },
+        )
+        userActualizedInfo.currentActionType = TYPING_PROFILE_NAME
+        userActualizedInfo.data = callbackData.messageId
     }
 
     private fun updatePropertyField(
@@ -519,23 +767,8 @@ class ManageProfilesFetcher(
                 },
             )
         } else {
-            val callbackBack = callbackDataRepository.save(
-                CallbackData(
-                    messageId = messageId,
-                    callbackData = "#back_to_list",
-                ),
-            )
-
-            val keyboard = createKeyboard(
-                listOf(
-                    listOf(
-                        InlineKeyboardButton().also {
-                            it.text = "Ко всем профилям"
-                            it.callbackData = callbackBack.id.toString()
-                        },
-                    ),
-                ),
-            )
+            val backButton = toProfilesListButton(messageId)
+            val keyboard = createKeyboard(listOf(listOf(backButton)))
 
             bot.execute(
                 EditMessageText().also {
@@ -548,6 +781,7 @@ class ManageProfilesFetcher(
             )
         }
     }
+
     private fun confirmRemoveProfile(
         update: Update,
         userActualizedInfo: UserActualizedInfo,
@@ -797,10 +1031,6 @@ class ManageProfilesFetcher(
         }
     }
 
-    private fun newProfile() {
-        TODO()
-    }
-
     private fun selectProfile(
         update: Update,
         userActualizedInfo: UserActualizedInfo,
@@ -891,19 +1121,20 @@ class ManageProfilesFetcher(
                         it.callbackData = callbackUpdProperty.id.toString()
                     },
                 ),
-                listOf(
-                    InlineKeyboardButton().also {
-                        it.text = "❌ Удалить профиль"
-                        it.callbackData = callbackRemove.id.toString()
-                    },
-                ),
             ),
         )
 
         propertyContentButton?.let {
             buttons.add(listOf(it))
         }
-
+        buttons.add(
+            listOf(
+                InlineKeyboardButton().also {
+                    it.text = "❌ Удалить профиль"
+                    it.callbackData = callbackRemove.id.toString()
+                },
+            ),
+        )
         buttons.add(
             listOf(
                 InlineKeyboardButton().also {
@@ -1068,15 +1299,16 @@ class ManageProfilesFetcher(
             chunkedProfiles.add(mutableListOf(last))
         }
 
+        val callback = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "new profile",
+            ),
+        )
+
         chunkedProfiles.add(
             mutableListOf(
                 InlineKeyboardButton().also {
-                    val callback = callbackDataRepository.save(
-                        CallbackData(
-                            messageId = messageId,
-                            callbackData = "new profile",
-                        ),
-                    )
                     it.text = "Создать новый профиль"
                     it.callbackData = callback.id.toString()
                 },
@@ -1135,6 +1367,41 @@ class ManageProfilesFetcher(
             it.callbackData = callbackBack.id.toString()
         }
     }
+
+    private fun toProfilesListButton(
+        messageId: String,
+        buttonText: String = "Ко всем профилям",
+    ): InlineKeyboardButton {
+        val callbackBack = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#back_to_list",
+            ),
+        )
+
+        return InlineKeyboardButton().also {
+            it.text = buttonText
+            it.callbackData = callbackBack.id.toString()
+        }
+    }
+
+    // TODO: не нравится мне что cd2b и бот для валидации могут использовать разные условия,
+    // могут появиться расхождения. TODO("добавить в cd2b нужные для валидации ручки")
+    private fun isGitHubRepository(link: String): Boolean {
+        val githubRepoPattern = Pattern.compile("^https?://github\\.com/[\\w\\-]+/[\\w\\-]+\\.git$")
+        val matcher = githubRepoPattern.matcher(link)
+        return matcher.matches()
+    }
+
+    fun isValidPort(port: String): Boolean {
+        return try {
+            val number = port.toInt()
+            number in 1..65535
+        } catch (e: NumberFormatException) {
+            false
+        }
+    }
+
     private data class CallbackKeyboardStorage(
         private val store: MutableList<CallbackData> = mutableListOf(),
         var keyboard: List<List<InlineKeyboardButton>> = listOf(listOf()),

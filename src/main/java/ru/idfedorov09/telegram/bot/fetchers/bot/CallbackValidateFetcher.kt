@@ -31,7 +31,7 @@ class CallbackValidateFetcher(
     ) {
         if (!update.hasCallbackQuery()) return
         val chatId = updatesUtil.getChatId(update)
-        val id = update.callbackQuery.id.toLongOrNull()
+        val id = update.callbackQuery.data.toLongOrNull()
         val callbackInfo = id?.let { callbackDataRepository.findById(id).getOrNull() }
         callbackInfo ?: run {
             bot.execute(

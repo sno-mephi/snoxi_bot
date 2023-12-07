@@ -3,6 +3,7 @@ package ru.idfedorov09.telegram.bot.service
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.client.request.*
@@ -11,6 +12,7 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -18,6 +20,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
 import ru.idfedorov09.telegram.bot.data.model.ProfileBuildMessageResponse
+import ru.idfedorov09.telegram.bot.data.model.ProfileCreateResponse
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
 import java.net.ConnectException
 import java.net.URL
@@ -30,6 +33,9 @@ class Cd2bService {
             json()
         }
         install(WebSockets)
+        install(HttpTimeout) {
+            requestTimeoutMillis = Long.MAX_VALUE
+        }
     }
 
     @Value("\${cd2b.host:127.0.0.1}")
@@ -120,6 +126,32 @@ class Cd2bService {
         )
     }
 
+    fun createProfile(
+        profileName: String,
+        repoLink: String,
+        port: String,
+        errorStorage: MutableList<Cd2bError> = mutableListOf(),
+    ): ProfileCreateResponse? {
+        @Serializable
+        data class ProfileRequest(
+            val name: String,
+            val github: String,
+            val port: Int = 5613,
+            @SerialName("post_proc")
+            val postProc: Boolean? = null,
+        )
+
+        return doPost(
+            errorStorage = errorStorage,
+            endpoint = "/create_profile",
+            body = ProfileRequest(
+                name = profileName,
+                github = repoLink,
+                port = port.toInt(),
+            ),
+        )
+    }
+
     /**
      * По вебсокету перезапускает профиль с указанными настройками.
      * При получении обновления от сервера выполняет метод receiveTextAction
@@ -157,6 +189,8 @@ class Cd2bService {
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
         endpoint: String,
         params: Map<String, Any> = mapOf(),
+        body: Any? = null,
+        timeout: Long? = 20000,
     ): T? {
         val response: T? =
             runBlocking {
@@ -164,6 +198,13 @@ class Cd2bService {
                     val response = client.post("${url()}/${endpoint.removePrefix("/")}") {
                         params.forEach {
                             parameter(it.key, it.value)
+                        }
+                        body?.let {
+                            contentType(ContentType.Application.Json)
+                            setBody(body)
+                        }
+                        timeout {
+                            requestTimeoutMillis = timeout
                         }
                     }
 
