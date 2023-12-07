@@ -352,7 +352,7 @@ class ManageProfilesFetcher(
 
             val text = "\uD83D\uDEE0 Собираю образ контейнера для профиля `$profileName`\\, " +
                 "придется подождать\\.\n" +
-                "Чтобы тебе было спокойнее\\, вот логи сборки\\:\n\n" +
+                "\uD83D\uDE0C Чтобы тебе было спокойнее\\, вот логи сборки\\:\n\n" +
                 "```Docker\n$logsMessage".shortMessage(MAX_MSG_LENGTH - 3)
                     .plus("```")
 
