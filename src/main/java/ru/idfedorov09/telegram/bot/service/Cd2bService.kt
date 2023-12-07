@@ -103,6 +103,23 @@ class Cd2bService {
         )
     }
 
+    fun changePropertiesField(
+        profileName: String,
+        propertyKey: String,
+        propertyValue: String,
+        errorStorage: MutableList<Cd2bError> = mutableListOf(),
+    ): ProfileResponse? {
+        return doPost(
+            errorStorage = errorStorage,
+            endpoint = "/change_properties_field",
+            params = mapOf(
+                "profile_name" to profileName,
+                "key" to propertyKey,
+                "value" to propertyValue,
+            ),
+        )
+    }
+
     /**
      * По вебсокету перезапускает профиль с указанными настройками.
      * При получении обновления от сервера выполняет метод receiveTextAction
@@ -111,7 +128,7 @@ class Cd2bService {
         profileName: String,
         externalPort: Int = -1,
         shouldRebuild: Boolean = true,
-        receiveTextAction: (ProfileBuildMessageResponse?, Boolean) -> Unit = { _, _ -> },
+        receiveTextAction: (ProfileBuildMessageResponse?, Boolean, CloseReason?) -> Unit = { _, _, _ -> },
     ) {
         runBlocking {
             client.webSocket(
@@ -123,13 +140,14 @@ class Cd2bService {
                 while (true) {
                     val receive = incoming.receiveCatching()
                     if (receive.isClosed || receive.isFailure) {
-                        receiveTextAction(null, true)
+                        val closeReason = this.closeReason.await()
+                        receiveTextAction(null, true, closeReason)
                         break
                     }
                     val receivedText = (receive.getOrNull() as? Frame.Text)?.readText() ?: continue
 
                     val response: ProfileBuildMessageResponse = Json.decodeFromString(receivedText)
-                    receiveTextAction(response, false)
+                    receiveTextAction(response, false, null)
                 }
             }
         }
