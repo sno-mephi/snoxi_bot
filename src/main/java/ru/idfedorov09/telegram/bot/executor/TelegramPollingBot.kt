@@ -34,11 +34,11 @@ class TelegramPollingBot(
     }
 
     override fun getBotUsername(): String {
-        return botContainer.BOT_NAME
+        return botContainer.name
     }
 
     override fun getBotToken(): String {
-        return botContainer.BOT_TOKEN
+        return botContainer.token
     }
 
     @PostConstruct
@@ -56,9 +56,9 @@ class TelegramPollingBot(
             telegramBotsApi.registerBot(this)
             log.info("TelegramAPI started. Look for messages")
         } catch (e: TelegramApiException) {
-            log.error("Can't Connect. Pause " + botContainer.RECONNECT_PAUSE / 1000 + "sec and try again. Error: " + e.message)
+            log.error("Can't Connect. Pause " + botContainer.reconnectPause / 1000 + "sec and try again. Error: " + e.message)
             try {
-                Thread.sleep(botContainer.RECONNECT_PAUSE.toLong())
+                Thread.sleep(botContainer.reconnectPause.toLong())
             } catch (threadError: InterruptedException) {
                 log.error(threadError.message)
                 return

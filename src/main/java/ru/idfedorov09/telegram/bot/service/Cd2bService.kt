@@ -44,10 +44,16 @@ class Cd2bService {
     @Value("\${cd2b.port:8000}")
     private var cd2bPort: Int = 8000
 
+    @Value("\${cd2b.login:ROOT}")
+    private lateinit var login: String
+
+    @Value("\${cd2b.password:8000}")
+    private lateinit var password: String
+
     fun getAllProfiles(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
     ): List<ProfileResponse>? {
-        return doPost(errorStorage, "/all_profiles")
+        return doPost(errorStorage, "/all_profiles", body = userRequest())
     }
 
     fun url() = URL("http", cd2bHost, cd2bPort, "").toString()
@@ -60,6 +66,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/check_profile",
             params = mapOf("profile_name" to profileName),
+            body = userRequest(),
         )
     }
 
@@ -72,6 +79,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/set_port",
             params = mapOf("profile_name" to profileName, "port" to port),
+            body = userRequest(),
         )
     }
 
@@ -84,6 +92,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/upload_prop",
             params = mapOf("profile_name" to profileName, "file_url" to fileUrl),
+            body = userRequest(),
         )
     }
 
@@ -95,6 +104,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/remove",
             params = mapOf("profile_name" to profileName),
+            body = userRequest(),
         )
     }
 
@@ -106,6 +116,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/stop",
             params = mapOf("profile_name" to profileName),
+            body = userRequest(),
         )
     }
 
@@ -123,6 +134,7 @@ class Cd2bService {
                 "key" to propertyKey,
                 "value" to propertyValue,
             ),
+            body = userRequest(),
         )
     }
 
@@ -141,13 +153,26 @@ class Cd2bService {
             val postProc: Boolean? = null,
         )
 
+        @Serializable
+        data class ProfileCreateRequestBody(
+            @SerialName("profile_request")
+            val profileRequest: ProfileRequest,
+            @SerialName("user_request")
+            val userRequest: UserRequest,
+        )
+
+        val profileRequest = ProfileRequest(
+            name = profileName,
+            github = repoLink,
+            port = port.toInt(),
+        )
+
         return doPost(
             errorStorage = errorStorage,
             endpoint = "/create_profile",
-            body = ProfileRequest(
-                name = profileName,
-                github = repoLink,
-                port = port.toInt(),
+            body = ProfileCreateRequestBody(
+                profileRequest,
+                userRequest(),
             ),
         )
     }
@@ -167,7 +192,12 @@ class Cd2bService {
                 method = HttpMethod.Get,
                 host = cd2bHost,
                 port = cd2bPort,
-                path = "/rerun?profile_name=$profileName&external_port=$externalPort&rebuild=$shouldRebuild",
+                path = "/rerun?" +
+                    "profile_name=$profileName" +
+                    "&external_port=$externalPort" +
+                    "&rebuild=$shouldRebuild" +
+                    "&login=$login" +
+                    "&password=$password",
             ) {
                 while (true) {
                     val receive = incoming.receiveCatching()
@@ -268,4 +298,11 @@ class Cd2bService {
     private fun Cd2bError.addTo(errorStorage: MutableList<Cd2bError>) {
         errorStorage.add(this)
     }
+
+    @Serializable
+    private data class UserRequest(
+        val login: String,
+        val password: String,
+    )
+    private fun userRequest() = UserRequest(login = login, password = password)
 }

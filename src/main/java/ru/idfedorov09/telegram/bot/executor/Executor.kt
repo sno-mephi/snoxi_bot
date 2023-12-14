@@ -24,10 +24,10 @@ class Executor(
 
     override fun onUpdateReceived(update: Update) {}
     override fun getBotUsername(): String {
-        return botContainer.BOT_NAME
+        return botContainer.name
     }
 
     override fun getBotToken(): String {
-        return botContainer.BOT_TOKEN
+        return botContainer.token
     }
 }
