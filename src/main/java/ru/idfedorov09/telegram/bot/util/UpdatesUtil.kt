@@ -93,6 +93,6 @@ class UpdatesUtil(
         if (!(update.hasMessage() && update.message.hasDocument())) return null
         val fileId: String = update.message.document.fileId
         val file = bot.execute(GetFile().also { it.fileId = fileId })
-        return "https://api.telegram.org/file/bot" + botContainer.BOT_TOKEN + "/" + file.filePath
+        return "https://api.telegram.org/file/bot" + botContainer.token + "/" + file.filePath
     }
 }
