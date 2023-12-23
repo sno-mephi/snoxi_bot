@@ -1,6 +1,8 @@
 package ru.idfedorov09.telegram.bot.controller
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
@@ -21,6 +23,8 @@ class UpdatesController : UpdatesSender(), UpdatesHandler {
     @Qualifier(QUALIFIER_FLOW_TG_BOT)
     private lateinit var flowBuilder: FlowBuilder
 
+    val coroutineScope = CoroutineScope(Dispatchers.Default)
+
     companion object {
         private val log = LoggerFactory.getLogger(UpdatesController::class.java)
     }
@@ -32,12 +36,15 @@ class UpdatesController : UpdatesSender(), UpdatesHandler {
         val flowContext = FlowContext()
 
         // прогоняем граф с ожиданием
-        flowBuilder.initAndRun(
-            flowContext = flowContext,
-            dispatcher = Dispatchers.Default,
-            ExpContainer(), // экспы
-            telegramBot,
-            update,
-        )
+        // TODO: костыль; в flow-lib добавить фичу для того чтобы запускать граф асинхронно без ожидания
+        coroutineScope.launch {
+            flowBuilder.initAndRun(
+                flowContext = flowContext,
+                dispatcher = Dispatchers.Default,
+                ExpContainer(), // экспы
+                telegramBot,
+                update,
+            )
+        }
     }
 }
