@@ -10,9 +10,6 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.util.*
 import jakarta.annotation.PostConstruct
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
@@ -21,11 +18,13 @@ import org.telegram.telegrambots.meta.TelegramBotsApi
 import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession
+import ru.idfedorov09.telegram.bot.util.CoroutineManager
 import java.net.URL
 
 @Component
 class RouterService(
     private val gson: Gson,
+    private val coroutineManager: CoroutineManager,
 ) : TelegramLongPollingBot() {
     @Value("\${router.telegram.bot.token}")
     private lateinit var token: String
@@ -45,8 +44,6 @@ class RouterService(
     /** если true, то запросы кидаются на порт 1, если false то на порт 2**/
     private val isFirstActive: Boolean = true
 
-    private val coroutineScope = CoroutineScope(Dispatchers.Default)
-
     @Value("\${router.main.bot.host:127.0.0.1}")
     private lateinit var botHost: String
 
@@ -64,16 +61,15 @@ class RouterService(
     }
 
     override fun onUpdateReceived(update: Update) {
-        coroutineScope.launch(Dispatchers.Default) {
+        coroutineManager.doAsync {
             sendUpdate(gson.toJson(update), url())
         }
     }
 
-    @OptIn(InternalAPI::class)
     private suspend fun sendUpdate(updateJson: String, url: String, timeout: Long = 20000) {
         val response = client.post(url) {
             contentType(ContentType.Application.Json)
-            body = updateJson
+            setBody(updateJson)
             timeout {
                 requestTimeoutMillis = timeout
             }

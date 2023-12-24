@@ -10,7 +10,7 @@ enum class TextCommands(
     ),
 
     FEATURE_REALISE(
-        "⚡\uFE0F Выкатить релиз",
+        "⚡\uFE0F Раскатка релиза",
     ),
 
     HELP(

@@ -26,4 +26,7 @@ data class ProfileResponse(
 
     @SerialName("properties_content")
     val propertyContent: String?,
+
+    @SerialName("last_commit")
+    val lastCommit: String?,
 )
