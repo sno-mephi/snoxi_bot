@@ -50,13 +50,19 @@ class Cd2bService {
     @Value("\${cd2b.password:8000}")
     private lateinit var password: String
 
+    private var userRequest: UserRequest = UserRequest(login = login, password = password)
+
     fun getAllProfiles(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
     ): List<ProfileResponse>? {
-        return doPost(errorStorage, "/all_profiles", body = userRequest())
+        return doPost(errorStorage, "/all_profiles", body = userRequest)
     }
 
     fun url() = URL("http", cd2bHost, cd2bPort, "").toString()
+
+    fun setCredentials(login: String, password: String) {
+        userRequest = UserRequest(login = login, password = password)
+    }
 
     fun checkProfile(
         profileName: String,
@@ -66,7 +72,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/check_profile",
             params = mapOf("profile_name" to profileName),
-            body = userRequest(),
+            body = userRequest,
         )
     }
 
@@ -79,7 +85,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/set_port",
             params = mapOf("profile_name" to profileName, "port" to port),
-            body = userRequest(),
+            body = userRequest,
         )
     }
 
@@ -92,7 +98,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/upload_prop",
             params = mapOf("profile_name" to profileName, "file_url" to fileUrl),
-            body = userRequest(),
+            body = userRequest,
         )
     }
 
@@ -104,7 +110,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/remove",
             params = mapOf("profile_name" to profileName),
-            body = userRequest(),
+            body = userRequest,
         )
     }
 
@@ -116,7 +122,7 @@ class Cd2bService {
             errorStorage = errorStorage,
             endpoint = "/stop",
             params = mapOf("profile_name" to profileName),
-            body = userRequest(),
+            body = userRequest,
         )
     }
 
@@ -134,7 +140,7 @@ class Cd2bService {
                 "key" to propertyKey,
                 "value" to propertyValue,
             ),
-            body = userRequest(),
+            body = userRequest,
         )
     }
 
@@ -172,7 +178,7 @@ class Cd2bService {
             endpoint = "/create_profile",
             body = ProfileCreateRequestBody(
                 profileRequest,
-                userRequest(),
+                userRequest,
             ),
         )
     }
@@ -196,8 +202,8 @@ class Cd2bService {
                     "profile_name=$profileName" +
                     "&external_port=$externalPort" +
                     "&rebuild=$shouldRebuild" +
-                    "&login=$login" +
-                    "&password=$password",
+                    "&login=${userRequest.login}" +
+                    "&password=${userRequest.password}",
             ) {
                 while (true) {
                     val receive = incoming.receiveCatching()
@@ -304,5 +310,4 @@ class Cd2bService {
         val login: String,
         val password: String,
     )
-    private fun userRequest() = UserRequest(login = login, password = password)
 }

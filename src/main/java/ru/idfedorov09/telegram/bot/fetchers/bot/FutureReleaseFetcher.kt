@@ -68,18 +68,41 @@ class FutureReleaseFetcher(
     private fun handleText(params: Params) {
         when {
             params.text == TextCommands.FEATURE_REALISE.commandText -> {
-                checkSettings(params)
-                // FeatureRealise()
+                val refProfileExist = checkSettings()
+                if (refProfileExist) {
+                    futureRealize(params)
+                } else {
+                    emptySettings(params)
+                }
             }
         }
+    }
+
+    private fun futureRealize(
+        params: Params,
+        msgId: String? = null,
+    ) {
+        val text = "empty"
+        val messageId = msgId?.also {
+            bot.execute(
+                EditMessageText().also {
+                    it.messageId = msgId.toInt()
+                    it.chatId = params.userActualizedInfo.tui
+                    it.text = text
+                },
+            )
+        } ?: bot.execute(
+            SendMessage().also {
+                it.chatId = params.userActualizedInfo.tui
+                it.text = text
+            },
+        )
     }
 
     /**
      * Проверка целостности настроек; если ошибка при проверке целостности - сбить все нафиг
      */
-    private fun checkSettings(params: Params) {
-        releaseService.getRefProfile() ?: emptySettings(params)
-    }
+    private fun checkSettings() = releaseService.getRefProfile()?.let { true } ?: false
 
     /**
      * Метод который вызывается в случае если нет профилей для раскатки релизов
@@ -113,7 +136,7 @@ class FutureReleaseFetcher(
 
     private fun chooseReferProfile(params: Params, callbackData: CallbackData) {
         val profileName = callbackData.callbackData?.split("|")?.last() ?: return
-        cd2bService.checkProfile(profileName) ?: run {
+        val profile = cd2bService.checkProfile(profileName) ?: run {
             bot.execute(
                 EditMessageText().also {
                     it.chatId = params.userActualizedInfo.tui
@@ -124,7 +147,7 @@ class FutureReleaseFetcher(
             return
         }
 
-        releaseService.newRefProfile(profileName)
+        releaseService.newRefProfile(profile)
 
         // TODO: добавить кнопку "К раскатке"
         bot.execute(
@@ -192,6 +215,7 @@ class FutureReleaseFetcher(
 
         callbackKeyboardStorage.keyboard = chunkedProfiles
 
+        // TODO: случай когда профилей нет?
         bot.execute(
             EditMessageText().also {
                 it.chatId = chatId
@@ -217,9 +241,6 @@ class FutureReleaseFetcher(
             button.callbackData = callback.id.toString()
             button.text = this.name
         }
-
-    private fun futureRealize() {
-    }
 
     private fun createKeyboard(keyboard: List<List<InlineKeyboardButton>>) =
         InlineKeyboardMarkup().also { it.keyboard = keyboard }
