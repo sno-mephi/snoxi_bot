@@ -3,10 +3,7 @@ package ru.idfedorov09.telegram.bot.flow
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.QUALIFIER_FLOW_TG_BOT
-import ru.idfedorov09.telegram.bot.fetchers.bot.CallbackValidateFetcher
-import ru.idfedorov09.telegram.bot.fetchers.bot.InitialFetcher
-import ru.idfedorov09.telegram.bot.fetchers.bot.ManageProfilesFetcher
-import ru.idfedorov09.telegram.bot.fetchers.bot.UpdateDataFetcher
+import ru.idfedorov09.telegram.bot.fetchers.bot.*
 import ru.mephi.sno.libs.flow.belly.FlowBuilder
 import ru.mephi.sno.libs.flow.belly.FlowContext
 
@@ -19,6 +16,7 @@ open class TelegramBotFlowConfiguration(
     private val updateDataFetcher: UpdateDataFetcher,
     private val manageProfilesFetcher: ManageProfilesFetcher,
     private val callbackValidateFetcher: CallbackValidateFetcher,
+    private val featureRealiseFetcher: FutureReleaseFetcher,
 ) {
 
     /**
@@ -37,6 +35,7 @@ open class TelegramBotFlowConfiguration(
             fetch(callbackValidateFetcher)
             sequence(condition = { it.isValid() }) {
                 fetch(manageProfilesFetcher)
+                fetch(featureRealiseFetcher)
             }
             fetch(updateDataFetcher)
         }

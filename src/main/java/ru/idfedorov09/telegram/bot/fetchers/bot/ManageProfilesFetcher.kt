@@ -1402,7 +1402,7 @@ class ManageProfilesFetcher(
         }
     }
 
-    private data class CallbackKeyboardStorage(
+    data class CallbackKeyboardStorage(
         private val store: MutableList<CallbackData> = mutableListOf(),
         var keyboard: List<List<InlineKeyboardButton>> = listOf(listOf()),
     ) {
