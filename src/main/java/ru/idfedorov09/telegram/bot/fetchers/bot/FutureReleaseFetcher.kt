@@ -7,6 +7,10 @@ import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageTe
 import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
+import ru.idfedorov09.telegram.bot.data.GlobalConstants
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE1
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE2
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_TEST_PROFILE
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
 import ru.idfedorov09.telegram.bot.data.model.CallbackData
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
@@ -15,6 +19,7 @@ import ru.idfedorov09.telegram.bot.data.model.UserActualizedInfo
 import ru.idfedorov09.telegram.bot.executor.Executor
 import ru.idfedorov09.telegram.bot.repo.CallbackDataRepository
 import ru.idfedorov09.telegram.bot.service.Cd2bService
+import ru.idfedorov09.telegram.bot.service.RedisService
 import ru.idfedorov09.telegram.bot.service.ReleaseService
 import ru.idfedorov09.telegram.bot.util.MessageUtils.markdownFormat
 import ru.idfedorov09.telegram.bot.util.MessageUtils.shortMessage
@@ -32,6 +37,7 @@ class FutureReleaseFetcher(
     private val releaseService: ReleaseService,
     private val cd2bService: Cd2bService,
     private val bot: Executor,
+    private val redisService: RedisService,
 ) : GeneralFetcher() {
 
     @InjectData
@@ -62,13 +68,14 @@ class FutureReleaseFetcher(
             when {
                 startsWith("fr_set_profile") -> buildChooseConsole(params, callbackData)
                 startsWith("#select_refer_profile") -> chooseReferProfile(params, callbackData)
+                startsWith("#back_empty_select") -> emptySettings(params, callbackData.messageId)
             }
         }
     }
     private fun handleText(params: Params) {
         when {
             params.text == TextCommands.FEATURE_REALISE.commandText -> {
-                val refProfileExist = checkSettings()
+                val refProfileExist = isValidSettings()
                 if (refProfileExist) {
                     futureRealize(params)
                 } else {
@@ -102,35 +109,80 @@ class FutureReleaseFetcher(
     /**
      * Проверка целостности настроек; если ошибка при проверке целостности - сбить все нафиг
      */
-    private fun checkSettings() = releaseService.getRefProfile()?.let { true } ?: false
+    private fun isValidSettings() = releaseService.getRefProfiles().isNotEmpty()
 
-    /**
-     * Метод который вызывается в случае если нет профилей для раскатки релизов
-     */
-    private fun emptySettings(params: Params) {
-        val callbackBack = callbackDataRepository.save(
+    private fun cbDataFor(
+        profileKey: String,
+        data: String,
+        messageId: String?,
+    ): CallbackData? {
+        if (redisService.getSafe(profileKey) != null) return null
+        return callbackDataRepository.save(
             CallbackData(
-                callbackData = "fr_set_profile|||",
+                callbackData = data,
+                messageId = messageId,
             ),
         )
+    }
 
-        val button = InlineKeyboardButton().also {
-            it.text = "\uD83D\uDD29 Выбрать"
-            it.callbackData = callbackBack.id.toString()
+    /**
+     * Метод который вызывается в случае если нет профилей для раскатки релизов / они некорректны
+     */
+    private fun emptySettings(params: Params, lastMessageId: String? = null) {
+        val text = if (lastMessageId == null) {
+            "⚠\uFE0F Не найдены настройки опорных профилей, либо они слетели. Настрой их!\n\n" +
+                "Небольшая подсказка: для раскатки релизов необходимо три опорных профиля.\n" +
+                "Один из них -- тестовый, два - продуктовых (прод1 и прод2). " +
+                "Тестовый нужен для тестирования на стаффе, " +
+                "продуктовые -- для подмен во избежание даунтайма."
+        } else {
+            "Теперь выбери следующий профиль."
         }
 
-        val sentMsg = bot.execute(
-            SendMessage().also {
-                it.chatId = params.userActualizedInfo.tui
-                it.text = "⚠\uFE0F Не найден опорный профиль. Выбери его"
-                it.replyMarkup = createKeyboard(listOf(listOf(button)))
+        val messageId = if (lastMessageId == null) {
+            bot.execute(
+                SendMessage().also {
+                    it.chatId = params.userActualizedInfo.tui
+                    it.text = text
+                },
+            ).messageId.toString()
+        } else {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = params.userActualizedInfo.tui
+                    it.messageId = lastMessageId.toInt()
+                    it.text = text
+                },
+            )
+            lastMessageId
+        }
+
+        val dataFirstProfile = cbDataFor(GlobalConstants.RR_PROFILE1, "fr_set_profile_1", messageId)
+        val dataSecondProfile = cbDataFor(GlobalConstants.RR_PROFILE2, "fr_set_profile_2", messageId)
+        val dataTestProfile = cbDataFor(GlobalConstants.RR_TEST_PROFILE, "fr_set_profile_test", messageId)
+        val buttonCallbacks = listOf(dataFirstProfile, dataSecondProfile, dataTestProfile)
+
+        val buttons = listOf(
+            buttonCallbacks.filterNotNull().map { cb ->
+                InlineKeyboardButton().also {
+                    it.text = when (cb.callbackData) {
+                        "fr_set_profile_1" -> "Выбрать Прод1"
+                        "fr_set_profile_2" -> "Выбрать Прод2"
+                        "fr_set_profile_test" -> "Выбрать Тестовый"
+                        else -> "Это баг такой лол"
+                    }
+                    it.callbackData = cb.id.toString()
+                }
             },
         )
 
-        callbackDataRepository.save(
-            callbackBack.copy(
-                messageId = sentMsg.messageId.toString(),
-            ),
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = params.userActualizedInfo.tui
+                it.messageId = messageId.toInt()
+                it.text = text
+                it.replyMarkup = createKeyboard(buttons)
+            },
         )
     }
 
@@ -147,17 +199,25 @@ class FutureReleaseFetcher(
             return
         }
 
-        releaseService.newRefProfile(profile)
+        val isEnd = when (callbackData.callbackData.split("|")[1]) {
+            "fr_set_profile_1" -> releaseService.newFirstProfile(profile)
+            "fr_set_profile_2" -> releaseService.newSecondProfile(profile)
+            "fr_set_profile_test" -> releaseService.newTestProfile(profile)
+            else -> throw Exception("Ошибка при обработке нажатия на кнопку с выбором профиля")
+        }
 
         // TODO: добавить кнопку "К раскатке"
-        bot.execute(
-            EditMessageText().also {
-                it.chatId = params.userActualizedInfo.tui
-                it.messageId = callbackData.messageId?.toInt()
-                it.text = "\uD83D\uDCB9 Профиль `$profileName` успешно установлен в качестве опорного!"
-                it.parseMode = ParseMode.MARKDOWN
-            },
-        )
+        if (isEnd) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = params.userActualizedInfo.tui
+                    it.messageId = callbackData.messageId?.toInt()
+                    it.text = "\uD83D\uDCB9 Профили для раскатки успешно настроены!"
+                },
+            )
+        } else {
+            emptySettings(params, callbackData.messageId)
+        }
     }
     private fun buildChooseConsole(params: Params, callbackData: CallbackData) {
         val chatId = params.userActualizedInfo.tui
@@ -171,36 +231,41 @@ class FutureReleaseFetcher(
             },
         )
         val errorStorage = mutableListOf<Cd2bError>()
-        val profiles = cd2bService.getAllProfiles(errorStorage) ?: run {
-            val error = errorStorage.lastOrNull()
-            bot.execute(
-                EditMessageText().also {
-                    it.chatId = chatId
-                    it.messageId = messageId?.toInt()
+        val filterMap = listOf(RR_PROFILE1, RR_PROFILE2, RR_TEST_PROFILE).mapNotNull { redisService.getSafe(it) }
+        val profiles = cd2bService
+            .getAllProfiles(errorStorage)
+            ?.filter { it.name !in filterMap }
+            ?: run {
+                val error = errorStorage.lastOrNull()
+                bot.execute(
+                    EditMessageText().also {
+                        it.chatId = chatId
+                        it.messageId = messageId?.toInt()
 
-                    // TODO: написать сервис для иницидентов
-                    val statusCode = "${error?.statusCode}".markdownFormat()
-                    val desc = "${error?.statusDescription}".markdownFormat()
-                    val trace = "${error?.stackTrace}".markdownFormat()
+                        // TODO: написать сервис для иницидентов
+                        val statusCode = "${error?.statusCode}".markdownFormat()
+                        val desc = "${error?.statusDescription}".markdownFormat()
+                        val trace = "${error?.stackTrace}".markdownFormat()
 
-                    val text = "❗\uFE0FОбнаружен инцидент\\. Сервис cd2b вернул код `$statusCode`\\.\n" +
-                        "Описание: `$desc`\n" +
-                        "Трасса:\n```\n$trace"
-                            .shortMessage(4096 - 3)
-                            .plus("```")
+                        val text = "❗\uFE0FОбнаружен инцидент\\. Сервис cd2b вернул код `$statusCode`\\.\n" +
+                            "Описание: `$desc`\n" +
+                            "Трасса:\n```\n$trace"
+                                .shortMessage(4096 - 3)
+                                .plus("```")
 
-                    it.text = text
-                    it.parseMode = ParseMode.MARKDOWNV2
-                },
-            )
-            return
-        }
+                        it.text = text
+                        it.parseMode = ParseMode.MARKDOWNV2
+                    },
+                )
+                return
+            }
 
         val callbackKeyboardStorage = ManageProfilesFetcher.CallbackKeyboardStorage()
+        val additionalData = callbackData.callbackData ?: "error"
 
         val chunkedProfiles = profiles
             .chunked(3)
-            .map { it.map { it.mapProfileToButton(messageId, callbackKeyboardStorage) } }
+            .map { it.map { it.mapProfileToButton(messageId, callbackKeyboardStorage, additionalData) } }
             .map { it.toMutableList() }.toMutableList()
 
         if (chunkedProfiles.size > 1 && chunkedProfiles.last().size == 1) {
@@ -213,14 +278,28 @@ class FutureReleaseFetcher(
             chunkedProfiles.add(mutableListOf(last))
         }
 
+        val backCallbackData = callbackDataRepository.save(
+            CallbackData(
+                messageId = messageId,
+                callbackData = "#back_empty_select",
+            ),
+        )
+        val backButton = InlineKeyboardButton().also {
+            it.text = "Назад"
+            it.callbackData = backCallbackData.id.toString()
+        }
+
+        chunkedProfiles.add(mutableListOf(backButton))
+
         callbackKeyboardStorage.keyboard = chunkedProfiles
 
         // TODO: случай когда профилей нет?
+        // TODO: кнопка НАЗАД
         bot.execute(
             EditMessageText().also {
                 it.chatId = chatId
                 it.messageId = messageId?.toInt()
-                it.text = "\uD83D\uDC40 Выбери опорный профиль:"
+                it.text = "\uD83D\uDC40 Выбери профиль:"
                 it.replyMarkup = createKeyboard(chunkedProfiles)
             },
         )
@@ -229,12 +308,13 @@ class FutureReleaseFetcher(
     private fun ProfileResponse.mapProfileToButton(
         messageId: String?,
         callbackKeyboardStorage: ManageProfilesFetcher.CallbackKeyboardStorage,
+        additionalData: String,
     ) = InlineKeyboardButton()
         .also { button ->
             val callback = callbackDataRepository.save(
                 CallbackData(
                     messageId = messageId,
-                    callbackData = "#select_refer_profile|${this.name}",
+                    callbackData = "#select_refer_profile|$additionalData|${this.name}",
                 ),
             )
             callbackKeyboardStorage.addCallback(callback)
