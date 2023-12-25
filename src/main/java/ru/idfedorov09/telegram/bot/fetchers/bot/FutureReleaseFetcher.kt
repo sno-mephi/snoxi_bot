@@ -69,6 +69,7 @@ class FutureReleaseFetcher(
                 startsWith("fr_set_profile") -> buildChooseConsole(params, callbackData)
                 startsWith("#select_refer_profile") -> chooseReferProfile(params, callbackData)
                 startsWith("#back_empty_select") -> emptySettings(params, callbackData.messageId)
+                startsWith("#future_release_button") -> futureRelease(params, callbackData.messageId)
             }
         }
     }
@@ -77,7 +78,7 @@ class FutureReleaseFetcher(
             params.text == TextCommands.FEATURE_REALISE.commandText -> {
                 val refProfileExist = isValidSettings()
                 if (refProfileExist) {
-                    futureRealize(params)
+                    futureRelease(params)
                 } else {
                     emptySettings(params)
                 }
@@ -85,7 +86,7 @@ class FutureReleaseFetcher(
         }
     }
 
-    private fun futureRealize(
+    private fun futureRelease(
         params: Params,
         msgId: String? = null,
     ) {
@@ -208,11 +209,23 @@ class FutureReleaseFetcher(
 
         // TODO: добавить кнопку "К раскатке"
         if (isEnd) {
+            val futureReleaseCallback = callbackDataRepository.save(
+                CallbackData(
+                    messageId = callbackData.messageId,
+                    callbackData = "#future_release_button",
+                ),
+            )
+            val button = InlineKeyboardButton().also {
+                it.text = "К раскатке"
+                it.callbackData = futureReleaseCallback.id.toString()
+            }
+
             bot.execute(
                 EditMessageText().also {
                     it.chatId = params.userActualizedInfo.tui
                     it.messageId = callbackData.messageId?.toInt()
-                    it.text = "\uD83D\uDCB9 Профили для раскатки успешно настроены!"
+                    it.text = "\uD83D\uDCB9 Профили для раскатки успешно настроены"
+                    it.replyMarkup = createKeyboard(listOf(listOf(button)))
                 },
             )
         } else {
