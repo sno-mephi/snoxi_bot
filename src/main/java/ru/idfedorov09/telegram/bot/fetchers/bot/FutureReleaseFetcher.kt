@@ -1,6 +1,5 @@
 package ru.idfedorov09.telegram.bot.fetchers.bot
 
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.telegram.telegrambots.meta.api.methods.ParseMode
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage
@@ -42,15 +41,6 @@ class FutureReleaseFetcher(
     private val bot: Executor,
     private val redisService: RedisService,
 ) : GeneralFetcher() {
-
-    @Value("\${test.router.telegram.bot.token}")
-    private val testingBotToken: String = "some-token"
-
-    @Value("\${test.router.telegram.bot.name}")
-    private val testingBotName: String = "test_snomephi_bot"
-
-    @Value("\${test.router.port}")
-    private val port: Int = 9445
 
     @InjectData
     fun doFetch(
@@ -119,6 +109,7 @@ class FutureReleaseFetcher(
             "server.address" to "0.0.0.0",
             "spring.redis.host" to redisHost,
             "spring.redis.port" to redisPort.toString(),
+            "spring.redis.password" to redisPassword,
             "spring.datasource.url" to postgresUrl,
             "spring.datasource.username" to postgresUsername,
             "spring.datasource.password" to postgresPassword,
@@ -129,7 +120,7 @@ class FutureReleaseFetcher(
             cd2bService.changePropertiesField(
                 profileName,
                 it.key,
-                it.value
+                it.value,
             )
         }
     }
