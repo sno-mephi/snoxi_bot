@@ -11,6 +11,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.websocket.*
+import jakarta.annotation.PostConstruct
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -50,7 +51,7 @@ class Cd2bService {
     @Value("\${cd2b.password:8000}")
     private lateinit var password: String
 
-    private var userRequest: UserRequest = UserRequest(login = login, password = password)
+    private lateinit var userRequest: UserRequest
 
     fun getAllProfiles(
         errorStorage: MutableList<Cd2bError> = mutableListOf(),
@@ -59,6 +60,11 @@ class Cd2bService {
     }
 
     fun url() = URL("http", cd2bHost, cd2bPort, "").toString()
+
+    @PostConstruct
+    private fun setCredentials() {
+        userRequest = UserRequest(login = login, password = password)
+    }
 
     fun setCredentials(login: String, password: String) {
         userRequest = UserRequest(login = login, password = password)

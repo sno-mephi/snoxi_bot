@@ -1,7 +1,9 @@
 package ru.idfedorov09.telegram.bot.service
 
 import org.springframework.stereotype.Component
-import ru.idfedorov09.telegram.bot.data.GlobalConstants.REDIS_REALISE_REFPROFILE_NAME
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE1
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE2
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_TEST_PROFILE
 import ru.idfedorov09.telegram.bot.data.enums.ReleaseStages
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
@@ -19,18 +21,36 @@ class ReleaseService(
     private val releaseHistoryRepository: ReleaseHistoryRepository,
 ) {
 
-    fun getRefProfile(): ProfileResponse? {
-        val profileResponse = checkProfileAvailable()
-        profileResponse ?: removeRefProfile()
+    private val profileKeys = listOf(
+        RR_PROFILE1,
+        RR_PROFILE2,
+        RR_TEST_PROFILE,
+    )
+
+    /**
+     * Вытаскивает все профили
+     */
+    fun getRefProfiles(): List<ProfileResponse> {
+        val profiles = profileKeys.map { getRefProfile(it) }
+        if (profiles.any { it == null }) {
+            releaseHistoryRepository.deleteAll()
+            return listOf()
+        }
+        return profiles.filterNotNull()
+    }
+
+    private fun getRefProfile(redisProfileKey: String): ProfileResponse? {
+        val profileResponse = checkProfileAvailability(redisProfileKey)
+        profileResponse ?: removeRefProfile(redisProfileKey)
         return profileResponse
     }
 
     /**
-     * Проверяет профиль на доступность.
+     * Проверяет профиль на доступность. Его имя - значение ключа redisProfileKey из редиса
      * Если доступен - то возвращает это профиль, если нет - то null
      */
-    private fun checkProfileAvailable(): ProfileResponse? {
-        val profileName = redisService.getSafe(REDIS_REALISE_REFPROFILE_NAME) ?: return null
+    private fun checkProfileAvailability(redisProfileKey: String): ProfileResponse? {
+        val profileName = redisService.getSafe(redisProfileKey) ?: return null
         val errorStorage = mutableListOf<Cd2bError>()
         val profileResponse = cd2bService.checkProfile(profileName, errorStorage)
 
@@ -41,24 +61,37 @@ class ReleaseService(
         return profileResponse
     }
 
-    fun removeRefProfile() {
-        val profileName = redisService.getSafe(REDIS_REALISE_REFPROFILE_NAME)
-        redisService.del(REDIS_REALISE_REFPROFILE_NAME)
-        profileName ?: return
-        releaseHistoryRepository.removeWithProfileName(profileName)
-    }
+    private fun removeRefProfile(redisProfileKey: String) = redisService.del(redisProfileKey)
 
-    fun newRefProfile(profileName: ProfileResponse) {
-        removeRefProfile()
-        redisService.setValue(REDIS_REALISE_REFPROFILE_NAME, profileName.name)
+    /**
+     * Если все профили выгружены, то записывает это в бдшку
+     */
+    private fun tryApplyAllChanges(): Boolean {
+        val profileNames = profileKeys.associateWith { redisService.getSafe(it) }
+        if (profileNames.any { it.value == null }) return false
         releaseHistoryRepository.save(
             ReleaseHistory(
-                profileName = profileName.name,
+                firstProfileName = profileNames[RR_PROFILE1],
+                secondProfileName = profileNames[RR_PROFILE1],
+                testProfileName = profileNames[RR_TEST_PROFILE],
                 stage = ReleaseStages.ABS_EMPTY,
                 isFinished = false,
-                commitHash = profileName.lastCommit,
-                // TODO: текущая дата
+                commitHash = null,
             ),
         )
+        return true
     }
+
+    fun newRefProfile(
+        redisProfileKey: String,
+        profile: ProfileResponse,
+    ): Boolean {
+        removeRefProfile(redisProfileKey)
+        redisService.setValue(redisProfileKey, profile.name)
+        return tryApplyAllChanges()
+    }
+
+    fun newTestProfile(profile: ProfileResponse) = newRefProfile(RR_TEST_PROFILE, profile)
+    fun newFirstProfile(profile: ProfileResponse) = newRefProfile(RR_PROFILE1, profile)
+    fun newSecondProfile(profile: ProfileResponse) = newRefProfile(RR_PROFILE2, profile)
 }
