@@ -19,27 +19,15 @@ import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession
 import ru.idfedorov09.telegram.bot.util.CoroutineManager
+import ru.idfedorov09.telegram.bot.util.ReleasesPropertiesStorage
 import java.net.URL
 
 @Component
 class RouterService(
     private val gson: Gson,
     private val coroutineManager: CoroutineManager,
+    private val propertiesStorage: ReleasesPropertiesStorage,
 ) : TelegramLongPollingBot() {
-    @Value("\${router.telegram.bot.token}")
-    private lateinit var token: String
-
-    @Value("\${router.telegram.bot.name}")
-    private lateinit var name: String
-
-    @Value("\${router.telegram.bot.reconnect-pause:1000}")
-    private var reconnectPause: Long = 1000
-
-    @Value("\${router.port.first:9441}")
-    private var firstPort: Int = 9441
-
-    @Value("\${router.port.second:9442}")
-    private var secondPort: Int = 9442
 
     /** если true, то запросы кидаются на порт 1, если false то на порт 2**/
     private val isFirstActive: Boolean = true
@@ -81,6 +69,8 @@ class RouterService(
 
     @PostConstruct
     fun botConnect() {
+        val reconnectPause: Long = 1000
+
         lateinit var telegramBotsApi: TelegramBotsApi
 
         try {
@@ -105,8 +95,8 @@ class RouterService(
         }
     }
 
-    override fun getBotUsername() = name
-    override fun getBotToken() = token
-    private fun portResolve() = if (isFirstActive) firstPort else secondPort
+    override fun getBotUsername() = propertiesStorage.prodGeneral.name
+    override fun getBotToken() = propertiesStorage.prodGeneral.token
+    private fun portResolve() = if (isFirstActive) propertiesStorage.prod1.port else propertiesStorage.prod2.port
     private fun url() = URL("http", botHost, portResolve(), "").toString()
 }
