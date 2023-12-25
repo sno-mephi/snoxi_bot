@@ -1,24 +1,21 @@
 package ru.idfedorov09.telegram.bot.data.enums
 
-enum class ReleaseStages {
-    /** Вообще не раскатан, ничего до этого вообще не было;
-     * иными словами - опорный профиль только создан **/
-    ABS_EMPTY,
+enum class ReleaseStages(
+    val description: String,
+) {
+    ABS_EMPTY("Новый"),
 
-    /** В тестинге, ожидает апрувов **/
-    TESTING,
+    STARTING_TEST("Запускается на тестинге"),
 
-    /** Раскатка отменена **/
-    CANCELED,
+    TESTING("В тестинге, ожидает апрувов"),
 
-    /** Обнаружены ошибки, дальше не катится **/
-    FAILURE,
+    CANCELED("Раскатка отменена"),
 
-    /** Началась выкадка в прод**/
-    RELEASE_PROCESSING,
+    FAILURE("В тестинге обнаружены ошибки/баги, раскатка отменена"),
 
-    /** В проде **/
-    FINISHED,
+    RELEASE_PROCESSING("В процессе выкатки в прод"),
+
+    IN_PRODUCTION("Запущено в продакшне"),
     ;
 
     operator fun invoke() = this.toString()

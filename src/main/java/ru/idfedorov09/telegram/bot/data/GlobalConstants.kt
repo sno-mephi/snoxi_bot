@@ -14,7 +14,9 @@ object GlobalConstants {
     const val RR_PROFILE1 = "realise_profile_1"
     const val RR_PROFILE2 = "realise_profile_2"
     const val RR_TEST_PROFILE = "realise_testing"
+    const val RR_REALISE_STAGE = "realise_stage"
+    const val RR_APPROVES_COUNT = "realise_approves_count"
 
-    /** минимальное количество апрувов для того, чтобы начать катить релиз в прод **/
+    /** Минимальное количество апрувов для того, чтобы начать катить релиз в прод **/
     const val MIN_APPROVES_COUNT = 1
 }

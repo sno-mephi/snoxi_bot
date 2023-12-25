@@ -10,7 +10,9 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import ru.idfedorov09.telegram.bot.data.GlobalConstants
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE1
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE2
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_REALISE_STAGE
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_TEST_PROFILE
+import ru.idfedorov09.telegram.bot.data.enums.ReleaseStages
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
 import ru.idfedorov09.telegram.bot.data.model.CallbackData
 import ru.idfedorov09.telegram.bot.data.model.Cd2bError
@@ -70,6 +72,8 @@ class FutureReleaseFetcher(
                 startsWith("#select_refer_profile") -> chooseReferProfile(params, callbackData)
                 startsWith("#back_empty_select") -> emptySettings(params, callbackData.messageId)
                 startsWith("#future_release_button") -> futureRelease(params, callbackData.messageId)
+                startsWith("#start_new_release") -> TODO("раскатка нового релиза")
+                startsWith("#cancel_last_release") -> TODO("откат предыдущего релиза с прода")
             }
         }
     }
@@ -90,21 +94,51 @@ class FutureReleaseFetcher(
         params: Params,
         msgId: String? = null,
     ) {
-        val text = "empty"
+        val currentStage = ReleaseStages.valueOf(redisService.getSafe(RR_REALISE_STAGE) ?: "ABS_EMPTY")
+        val text = "Текущий статус: _${currentStage.description}_"
+
+        val newReleaseCallback = callbackDataRepository.save(
+            CallbackData(
+                callbackData = "#start_new_release",
+            ),
+        )
+        val cancelLastReleaseCallback = callbackDataRepository.save(
+            CallbackData(
+                callbackData = "#cancel_last_release",
+            ),
+        )
+
+        val newReleaseButton = InlineKeyboardButton().also {
+            it.text = "Новый релиз"
+            it.callbackData = newReleaseCallback.id.toString()
+        }
+
+        val cancelLastReleaseButton = InlineKeyboardButton().also {
+            it.text = "Откатить прошлый релиз"
+            it.callbackData = cancelLastReleaseCallback.id.toString()
+        }
+
         val messageId = msgId?.also {
             bot.execute(
                 EditMessageText().also {
                     it.messageId = msgId.toInt()
                     it.chatId = params.userActualizedInfo.tui
                     it.text = text
+                    it.replyMarkup = createKeyboard(listOf(listOf(newReleaseButton), listOf(cancelLastReleaseButton)))
+                    it.parseMode = ParseMode.MARKDOWN
                 },
             )
         } ?: bot.execute(
             SendMessage().also {
                 it.chatId = params.userActualizedInfo.tui
                 it.text = text
+                it.replyMarkup = createKeyboard(listOf(listOf(newReleaseButton), listOf(cancelLastReleaseButton)))
+                it.parseMode = ParseMode.MARKDOWN
             },
-        )
+        ).messageId
+
+        callbackDataRepository.save(newReleaseCallback.copy(messageId = messageId.toString()))
+        callbackDataRepository.save(cancelLastReleaseCallback.copy(messageId = messageId.toString()))
     }
 
     /**
@@ -207,7 +241,6 @@ class FutureReleaseFetcher(
             else -> throw Exception("Ошибка при обработке нажатия на кнопку с выбором профиля")
         }
 
-        // TODO: добавить кнопку "К раскатке"
         if (isEnd) {
             val futureReleaseCallback = callbackDataRepository.save(
                 CallbackData(
@@ -228,6 +261,8 @@ class FutureReleaseFetcher(
                     it.replyMarkup = createKeyboard(listOf(listOf(button)))
                 },
             )
+
+            redisService.setValue(RR_REALISE_STAGE, ReleaseStages.ABS_EMPTY())
         } else {
             emptySettings(params, callbackData.messageId)
         }

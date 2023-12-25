@@ -1,5 +1,6 @@
 package ru.idfedorov09.telegram.bot.service
 
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE1
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE2
@@ -9,6 +10,8 @@ import ru.idfedorov09.telegram.bot.data.model.Cd2bError
 import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
 import ru.idfedorov09.telegram.bot.data.model.ReleaseHistory
 import ru.idfedorov09.telegram.bot.repo.ReleaseHistoryRepository
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Сервис для управления релизами
@@ -77,12 +80,14 @@ class ReleaseService(
                 stage = ReleaseStages.ABS_EMPTY,
                 isFinished = false,
                 commitHash = null,
+                eventDescription = "Изменены настройки раскатки.",
+                time = LocalDateTime.now(ZoneId.of("Europe/Moscow")),
             ),
         )
         return true
     }
 
-    fun newRefProfile(
+    private fun newRefProfile(
         redisProfileKey: String,
         profile: ProfileResponse,
     ): Boolean {

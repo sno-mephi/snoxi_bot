@@ -2,6 +2,7 @@ package ru.idfedorov09.telegram.bot.data.model
 
 import jakarta.persistence.*
 import ru.idfedorov09.telegram.bot.data.enums.ReleaseStages
+import java.time.LocalDateTime
 
 /**
  * Таблица с историями релизов
@@ -39,5 +40,10 @@ data class ReleaseHistory(
     @Column(name = "commit_hash", columnDefinition = "TEXT")
     val commitHash: String? = null,
 
-    // TODO: дата события
+    /** Описание события **/
+    @Column(name = "event_desc", columnDefinition = "TEXT")
+    val eventDescription: String? = null,
+
+    @Column(name = "time")
+    val time: LocalDateTime? = null,
 )
