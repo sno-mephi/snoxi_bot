@@ -1,5 +1,6 @@
 package ru.idfedorov09.telegram.bot.fetchers.bot
 
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.telegram.telegrambots.meta.api.methods.ParseMode
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage
@@ -42,6 +43,15 @@ class FutureReleaseFetcher(
     private val redisService: RedisService,
 ) : GeneralFetcher() {
 
+    @Value("\${test.router.telegram.bot.token}")
+    private val testingBotToken: String = "some-token"
+
+    @Value("\${test.router.telegram.bot.name}")
+    private val testingBotName: String = "test_snomephi_bot"
+
+    @Value("\${test.router.port}")
+    private val port: Int = 9445
+
     @InjectData
     fun doFetch(
         update: Update,
@@ -72,7 +82,7 @@ class FutureReleaseFetcher(
                 startsWith("#select_refer_profile") -> chooseReferProfile(params, callbackData)
                 startsWith("#back_empty_select") -> emptySettings(params, callbackData.messageId)
                 startsWith("#future_release_button") -> futureRelease(params, callbackData.messageId)
-                startsWith("#start_new_release") -> TODO("раскатка нового релиза")
+                startsWith("#start_new_release") -> startNewRelease(params, callbackData)
                 startsWith("#cancel_last_release") -> TODO("откат предыдущего релиза с прода")
             }
         }
@@ -88,6 +98,47 @@ class FutureReleaseFetcher(
                 }
             }
         }
+    }
+
+    private fun changeCoreSettings(
+        profileName: String,
+        botToken: String,
+        botName: String,
+        isTesting: Boolean,
+        redisHost: String,
+        redisPort: Int,
+        redisPassword: String,
+        postgresUrl: String,
+        postgresUsername: String,
+        postgresPassword: String,
+    ) {
+        val propertiesMap = mapOf(
+            "telegram.bot.token" to botToken,
+            "telegram.bot.name" to botName,
+            "telegram.bot.interaction-method" to (if (isTesting) "polling" else "webhook"),
+            "server.address" to "0.0.0.0",
+            "spring.redis.host" to redisHost,
+            "spring.redis.port" to redisPort.toString(),
+            "spring.datasource.url" to postgresUrl,
+            "spring.datasource.username" to postgresUsername,
+            "spring.datasource.password" to postgresPassword,
+            "spring.jpa.hibernate.ddl-auto" to "update", // TODO: ВАЖНО! А ЧТО ЕСЛИ С ЭТИМ ПРИДЕТСЯ ЧТО-ТО ДЕЛАТЬ??
+        )
+
+        propertiesMap.forEach {
+            cd2bService.changePropertiesField(
+                profileName,
+                it.key,
+                it.value
+            )
+        }
+    }
+    private fun startNewRelease(params: Params, callbackData: CallbackData) {
+        val testProfileName = redisService.getSafe(RR_TEST_PROFILE) ?: return emptySettings(params, callbackData.messageId)
+        // changeCoreSettings..
+        // пауза для ожидания запуска..
+        // рассылка стаффу что запущена новая версия и что мы ждем апрувов
+        // TODO
     }
 
     private fun futureRelease(
