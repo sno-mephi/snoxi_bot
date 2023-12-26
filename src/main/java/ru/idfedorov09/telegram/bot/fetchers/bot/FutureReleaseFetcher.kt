@@ -1,5 +1,6 @@
 package ru.idfedorov09.telegram.bot.fetchers.bot
 
+import kotlinx.coroutines.delay
 import org.springframework.stereotype.Component
 import org.telegram.telegrambots.meta.api.methods.ParseMode
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage
@@ -8,23 +9,25 @@ import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.GlobalConstants
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.MIN_APPROVES_COUNT
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_NEW_VERSION
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE1
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE2
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_REALISE_STAGE
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_TEST_PROFILE
 import ru.idfedorov09.telegram.bot.data.enums.ReleaseStages
 import ru.idfedorov09.telegram.bot.data.enums.TextCommands
-import ru.idfedorov09.telegram.bot.data.model.CallbackData
-import ru.idfedorov09.telegram.bot.data.model.Cd2bError
-import ru.idfedorov09.telegram.bot.data.model.ProfileResponse
-import ru.idfedorov09.telegram.bot.data.model.UserActualizedInfo
+import ru.idfedorov09.telegram.bot.data.model.*
 import ru.idfedorov09.telegram.bot.executor.Executor
 import ru.idfedorov09.telegram.bot.repo.CallbackDataRepository
+import ru.idfedorov09.telegram.bot.repo.SnoxiUserRepository
 import ru.idfedorov09.telegram.bot.service.Cd2bService
 import ru.idfedorov09.telegram.bot.service.RedisService
 import ru.idfedorov09.telegram.bot.service.ReleaseService
+import ru.idfedorov09.telegram.bot.util.CoroutineManager
 import ru.idfedorov09.telegram.bot.util.MessageUtils.markdownFormat
 import ru.idfedorov09.telegram.bot.util.MessageUtils.shortMessage
+import ru.idfedorov09.telegram.bot.util.ReleasesPropertiesStorage
 import ru.idfedorov09.telegram.bot.util.UpdatesUtil
 import ru.mephi.sno.libs.flow.belly.InjectData
 import ru.mephi.sno.libs.flow.fetcher.GeneralFetcher
@@ -40,6 +43,9 @@ class FutureReleaseFetcher(
     private val cd2bService: Cd2bService,
     private val bot: Executor,
     private val redisService: RedisService,
+    private val releasesPropertiesStorage: ReleasesPropertiesStorage,
+    private val snoxiUserRepository: SnoxiUserRepository,
+    private val coroutineManager: CoroutineManager,
 ) : GeneralFetcher() {
 
     @InjectData
@@ -90,46 +96,106 @@ class FutureReleaseFetcher(
         }
     }
 
+    /**
+     * Меняет настройки перед запуском; возвращает последний актуальный профиль
+     */
     private fun changeCoreSettings(
         profileName: String,
-        botToken: String,
-        botName: String,
         isTesting: Boolean,
-        redisHost: String,
-        redisPort: Int,
-        redisPassword: String,
-        postgresUrl: String,
-        postgresUsername: String,
-        postgresPassword: String,
-    ) {
+        profilePropertiesBase: ProfilePropertiesBase,
+    ): ProfileResponse? {
         val propertiesMap = mapOf(
-            "telegram.bot.token" to botToken,
-            "telegram.bot.name" to botName,
+            "telegram.bot.token" to profilePropertiesBase.token,
+            "telegram.bot.name" to profilePropertiesBase.name,
             "telegram.bot.interaction-method" to (if (isTesting) "polling" else "webhook"),
             "server.address" to "0.0.0.0",
-            "spring.redis.host" to redisHost,
-            "spring.redis.port" to redisPort.toString(),
-            "spring.redis.password" to redisPassword,
-            "spring.datasource.url" to postgresUrl,
-            "spring.datasource.username" to postgresUsername,
-            "spring.datasource.password" to postgresPassword,
+            "spring.redis.host" to profilePropertiesBase.redisHost,
+            "spring.redis.port" to profilePropertiesBase.redisPort.toString(),
+            "spring.redis.password" to profilePropertiesBase.redisPassword,
+            "spring.datasource.url" to profilePropertiesBase.postgresUrl,
+            "spring.datasource.username" to profilePropertiesBase.postgresUsername,
+            "spring.datasource.password" to profilePropertiesBase.postgresPassword,
             "spring.jpa.hibernate.ddl-auto" to "update", // TODO: ВАЖНО! А ЧТО ЕСЛИ С ЭТИМ ПРИДЕТСЯ ЧТО-ТО ДЕЛАТЬ??
         )
 
-        propertiesMap.forEach {
+        return propertiesMap.map {
             cd2bService.changePropertiesField(
                 profileName,
                 it.key,
                 it.value,
             )
-        }
+        }.lastOrNull()
     }
     private fun startNewRelease(params: Params, callbackData: CallbackData) {
-        val testProfileName = redisService.getSafe(RR_TEST_PROFILE) ?: return emptySettings(params, callbackData.messageId)
-        // changeCoreSettings..
-        // пауза для ожидания запуска..
-        // рассылка стаффу что запущена новая версия и что мы ждем апрувов
-        // TODO
+        val testProfileName = redisService.getSafe(RR_TEST_PROFILE)
+            ?: return emptySettings(params, callbackData.messageId)
+
+        val actualProfile = changeCoreSettings(
+            testProfileName,
+            isTesting = true,
+            releasesPropertiesStorage.test,
+        ) ?: return // TODO: ошибка
+
+        redisService.setValue(RR_NEW_VERSION, actualProfile.lastCommit)
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = params.userActualizedInfo.tui
+                it.messageId = callbackData.messageId?.toInt()
+                it.text = "Я начал развертывание тестового бота. После $MIN_APPROVES_COUNT аппрувов " +
+                    "раскатка перейдет к следующему этапу - в прод. \nО запуске ты узнаешь в отдельном сообщении."
+            },
+        )
+        coroutineManager.doAsync { runTestProfile(testProfileName, actualProfile) }
+    }
+
+    private suspend fun runTestProfile(
+        testProfileName: String,
+        actualProfile: ProfileResponse,
+        messageSendDelay: Long = 5000,
+    ) {
+        cd2bService.rerunProfile(profileName = testProfileName)
+
+        snoxiUserRepository.findAll().forEach { snoxiUser ->
+            snoxiUser.tui ?: return@forEach
+
+            // TODO: поддержать версию???
+            val okCallback = callbackDataRepository.save(
+                CallbackData(
+                    callbackData = "#new_release_ok|${actualProfile.lastCommit}",
+                ),
+            )
+            val failCallback = callbackDataRepository.save(
+                CallbackData(
+                    callbackData = "#new_release_fail|${actualProfile.lastCommit}",
+                ),
+            )
+
+            val okButton = InlineKeyboardButton().also {
+                it.text = "\uD83D\uDC4D"
+                it.callbackData = okCallback.id.toString()
+            }
+
+            val failButton = InlineKeyboardButton().also {
+                it.text = "\uD83D\uDC4E"
+                it.callbackData = failCallback.id.toString()
+            }
+
+            runCatching {
+                bot.execute(
+                    SendMessage().also {
+                        it.chatId = snoxiUser.tui
+                        it.text = "\uD83D\uDE80 В тестинг выкатилась новая версия бота. " +
+                            "Для тестирования напиши в @${releasesPropertiesStorage.test.name}. " +
+                            "Последние изменения можно найти в ${actualProfile.repoUri}.\n\n" +
+                            "⚠\uFE0F После тестирования обязательно оставь свой голос. " +
+                            "От этого будет зависеть, поедет ли новая версия в прод."
+                        it.replyMarkup = createKeyboard(listOf(listOf(okButton, failButton)))
+                    },
+                )
+                delay(messageSendDelay)
+            }
+        }
     }
 
     private fun futureRelease(
