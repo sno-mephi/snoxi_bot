@@ -106,10 +106,49 @@ class FutureReleaseFetcher(
     }
 
     private fun testingFailureVote(params: Params, callbackData: CallbackData) {
-        TODO("доделать")
+        val version = callbackData.callbackData?.split("|")?.last()
+        val currentNewVersion = redisService.getSafe(RR_NEW_VERSION)
+
+        if (version != currentNewVersion) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = params.userActualizedInfo.tui
+                    it.messageId = callbackData.messageId?.toInt()
+                    it.text = "_Данный релиз уже выкатили или отменили_"
+                    it.parseMode = ParseMode.MARKDOWN😿
+                },
+            )
+            return
+        }
+
+        redisService.del(RR_NEW_VERSION)
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = params.userActualizedInfo.tui
+                it.messageId = callbackData.messageId?.toInt()
+                it.text = "\uD83D\uDE3F Эхх.. Обязательно сообщи причину в рабочий чат! А я уже отменил выкатку " +
+                        "(заметь, тестового бота я не отключал)"
+            },
+        )
     }
 
     private fun testingIsOkVote(params: Params, callbackData: CallbackData) {
+        val version = callbackData.callbackData?.split("|")?.last()
+        val currentNewVersion = redisService.getSafe(RR_NEW_VERSION)
+
+        if (version != currentNewVersion) {
+            bot.execute(
+                EditMessageText().also {
+                    it.chatId = params.userActualizedInfo.tui
+                    it.messageId = callbackData.messageId?.toInt()
+                    it.text = "_Данный релиз уже выкатили или отменили_"
+                    it.parseMode = ParseMode.MARKDOWN
+                },
+            )
+            return
+        }
+
         bot.execute(
             EditMessageText().also {
                 it.chatId = params.userActualizedInfo.tui
