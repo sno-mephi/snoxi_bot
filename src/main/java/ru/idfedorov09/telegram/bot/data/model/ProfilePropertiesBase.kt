@@ -1,6 +1,6 @@
 package ru.idfedorov09.telegram.bot.data.model
 
-data class ProfilePropertiesBase (
+data class ProfilePropertiesBase(
     val token: String,
     val name: String,
     val port: Int,
