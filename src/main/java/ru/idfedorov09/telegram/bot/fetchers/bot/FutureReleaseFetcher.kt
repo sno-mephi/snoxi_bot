@@ -10,6 +10,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.GlobalConstants
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.MIN_APPROVES_COUNT
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_APPROVES_COUNT
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_NEW_VERSION
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE1
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_PROFILE2
@@ -80,6 +81,8 @@ class FutureReleaseFetcher(
                 startsWith("#future_release_button") -> futureRelease(params, callbackData.messageId)
                 startsWith("#start_new_release") -> startNewRelease(params, callbackData)
                 startsWith("#cancel_last_release") -> TODO("откат предыдущего релиза с прода")
+                startsWith("#new_release_ok") -> testingIsOkVote(params, callbackData)
+                startsWith("#new_release_fail") -> testingFailureVote(params, callbackData)
             }
         }
     }
@@ -93,6 +96,49 @@ class FutureReleaseFetcher(
                     emptySettings(params)
                 }
             }
+        }
+    }
+
+    @Synchronized
+    private fun voteUp() {
+        val currentVote = redisService.getSafe(RR_APPROVES_COUNT)?.toLong() ?: 0
+        redisService.setValue(RR_APPROVES_COUNT, currentVote.inc().toString())
+    }
+
+    private fun testingFailureVote(params: Params, callbackData: CallbackData) {
+        TODO("доделать")
+    }
+
+    private fun testingIsOkVote(params: Params, callbackData: CallbackData) {
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = params.userActualizedInfo.tui
+                it.messageId = callbackData.messageId?.toInt()
+                it.text = "Учитываю твой голос..."
+            },
+        )
+
+        voteUp()
+        val currentVote = redisService.getSafe(RR_APPROVES_COUNT)?.toLong() ?: 0
+        val remains = Math.max(MIN_APPROVES_COUNT - currentVote, 0L)
+
+        val text = "\uD83D\uDC4C Спасибо, твой голос учтен! " +
+            if (remains != 0L) {
+                "Остается $remains голосов"
+            } else {
+                "Сейчас начну выкатку в прод \uD83E\uDD73"
+            }
+
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = params.userActualizedInfo.tui
+                it.messageId = callbackData.messageId?.toInt()
+                it.text = text
+            },
+        )
+
+        if (remains == 0L) {
+            TODO("катим в прод")
         }
     }
 
@@ -217,12 +263,12 @@ class FutureReleaseFetcher(
         )
 
         val newReleaseButton = InlineKeyboardButton().also {
-            it.text = "Новый релиз"
+            it.text = "\uD83D\uDD39 Новый релиз"
             it.callbackData = newReleaseCallback.id.toString()
         }
 
         val cancelLastReleaseButton = InlineKeyboardButton().also {
-            it.text = "Откатить прошлый релиз"
+            it.text = "\uD83D\uDD34 Откатить прошлый релиз"
             it.callbackData = cancelLastReleaseCallback.id.toString()
         }
 
