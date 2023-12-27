@@ -9,6 +9,7 @@ object GlobalConstants {
     const val QUALIFIER_FLOW_HEALTH_STATUS = "health_flow_builder"
     const val QUEUE_PRE_PREFIX = "frjekcs_ewer_idfed09_user_bot_que_"
     const val BASE_ADMIN_ID = "920061911"
+    const val BASE_DEVELOPERS_CHAT_ID = "-1002057270905"
 
     const val MAX_MSG_LENGTH = 2048
     const val RR_PROFILE1 = "realise_profile_1"
