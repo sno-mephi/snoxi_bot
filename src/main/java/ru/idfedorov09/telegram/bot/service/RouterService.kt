@@ -8,7 +8,6 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
-import io.ktor.util.*
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -30,7 +29,7 @@ class RouterService(
 ) : TelegramLongPollingBot() {
 
     /** если true, то запросы кидаются на порт 1, если false то на порт 2**/
-    private val isFirstActive: Boolean = true
+    var isFirstActive: Boolean = true
 
     @Value("\${router.main.bot.host:127.0.0.1}")
     private lateinit var botHost: String

@@ -1,6 +1,7 @@
 package ru.idfedorov09.telegram.bot.fetchers.bot
 
 import kotlinx.coroutines.delay
+import org.apache.commons.lang3.BooleanUtils.xor
 import org.springframework.stereotype.Component
 import org.telegram.telegrambots.meta.api.methods.ParseMode
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage
@@ -9,6 +10,7 @@ import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import ru.idfedorov09.telegram.bot.data.GlobalConstants
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.BASE_DEVELOPERS_CHAT_ID
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.MIN_APPROVES_COUNT
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_APPROVES_COUNT
 import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_NEW_VERSION
@@ -25,6 +27,7 @@ import ru.idfedorov09.telegram.bot.repo.SnoxiUserRepository
 import ru.idfedorov09.telegram.bot.service.Cd2bService
 import ru.idfedorov09.telegram.bot.service.RedisService
 import ru.idfedorov09.telegram.bot.service.ReleaseService
+import ru.idfedorov09.telegram.bot.service.RouterService
 import ru.idfedorov09.telegram.bot.util.CoroutineManager
 import ru.idfedorov09.telegram.bot.util.MessageUtils.markdownFormat
 import ru.idfedorov09.telegram.bot.util.MessageUtils.shortMessage
@@ -47,6 +50,7 @@ class FutureReleaseFetcher(
     private val releasesPropertiesStorage: ReleasesPropertiesStorage,
     private val snoxiUserRepository: SnoxiUserRepository,
     private val coroutineManager: CoroutineManager,
+    private val routerService: RouterService,
 ) : GeneralFetcher() {
 
     @InjectData
@@ -115,7 +119,7 @@ class FutureReleaseFetcher(
                     it.chatId = params.userActualizedInfo.tui
                     it.messageId = callbackData.messageId?.toInt()
                     it.text = "_Данный релиз уже выкатили или отменили_"
-                    it.parseMode = ParseMode.MARKDOWN😿
+                    it.parseMode = ParseMode.MARKDOWN
                 },
             )
             return
@@ -128,7 +132,7 @@ class FutureReleaseFetcher(
                 it.chatId = params.userActualizedInfo.tui
                 it.messageId = callbackData.messageId?.toInt()
                 it.text = "\uD83D\uDE3F Эхх.. Обязательно сообщи причину в рабочий чат! А я уже отменил выкатку " +
-                        "(заметь, тестового бота я не отключал)"
+                    "(заметь, тестового бота я не отключал)"
             },
         )
     }
@@ -177,8 +181,36 @@ class FutureReleaseFetcher(
         )
 
         if (remains == 0L) {
-            TODO("катим в прод")
+            coroutineManager.doAsync { roadToProduction() }
         }
+    }
+
+    private suspend fun roadToProduction(
+        pauseBeforeToggleMainProfile: Long = 15000,
+    ) {
+        val isFirst = routerService.isFirstActive
+        val newProfileKey = if (isFirst) RR_PROFILE2 else RR_PROFILE1
+        val propertiesBase = if (isFirst) releasesPropertiesStorage.prod2 else releasesPropertiesStorage.prod1
+
+        val newProfileName = redisService.getSafe(newProfileKey) ?: return // TODO: ошибка
+        val actualProfile = changeCoreSettings(
+            newProfileName,
+            isTesting = false,
+            propertiesBase,
+        )
+        cd2bService.setPort(newProfileName, propertiesBase.port.toString())
+        cd2bService.rerunProfile(newProfileName, shouldRebuild = true)
+        delay(pauseBeforeToggleMainProfile)
+        routerService.isFirstActive = isFirst xor true
+
+        bot.execute(
+            SendMessage().also {
+                it.chatId = BASE_DEVELOPERS_CHAT_ID
+                it.text = "\uD83C\uDF89 Мы выкатили новую версию `${actualProfile?.lastCommit}` бота " +
+                    "@${propertiesBase.name.markdownFormat()} в прод!"
+                it.parseMode = ParseMode.MARKDOWN
+            },
+        )
     }
 
     /**
@@ -215,6 +247,13 @@ class FutureReleaseFetcher(
         val testProfileName = redisService.getSafe(RR_TEST_PROFILE)
             ?: return emptySettings(params, callbackData.messageId)
 
+        bot.execute(
+            EditMessageText().also {
+                it.chatId = params.userActualizedInfo.tui
+                it.messageId = callbackData.messageId?.toInt()
+                it.text = "Накатываю конфиги..."
+            },
+        )
         val actualProfile = changeCoreSettings(
             testProfileName,
             isTesting = true,
@@ -239,7 +278,7 @@ class FutureReleaseFetcher(
         actualProfile: ProfileResponse,
         messageSendDelay: Long = 5000,
     ) {
-        cd2bService.rerunProfile(profileName = testProfileName)
+        cd2bService.rerunProfile(profileName = testProfileName, shouldRebuild = true)
 
         snoxiUserRepository.findAll().forEach { snoxiUser ->
             snoxiUser.tui ?: return@forEach
@@ -267,7 +306,7 @@ class FutureReleaseFetcher(
             }
 
             runCatching {
-                bot.execute(
+                val sentMessage = bot.execute(
                     SendMessage().also {
                         it.chatId = snoxiUser.tui
                         it.text = "\uD83D\uDE80 В тестинг выкатилась новая версия бота. " +
@@ -278,6 +317,8 @@ class FutureReleaseFetcher(
                         it.replyMarkup = createKeyboard(listOf(listOf(okButton, failButton)))
                     },
                 )
+                callbackDataRepository.save(okCallback.copy(messageId = sentMessage.messageId.toString()))
+                callbackDataRepository.save(failCallback.copy(messageId = sentMessage.messageId.toString()))
                 delay(messageSendDelay)
             }
         }
