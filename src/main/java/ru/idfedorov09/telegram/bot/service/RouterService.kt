@@ -17,19 +17,22 @@ import org.telegram.telegrambots.meta.TelegramBotsApi
 import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession
+import ru.idfedorov09.telegram.bot.data.GlobalConstants.RR_IS_FIRST_ACTIVE
 import ru.idfedorov09.telegram.bot.util.CoroutineManager
 import ru.idfedorov09.telegram.bot.util.ReleasesPropertiesStorage
 import java.net.URL
 
+// TODO: вынести в отдельный микросервис
 @Component
 class RouterService(
     private val gson: Gson,
+    private val redisService: RedisService,
     private val coroutineManager: CoroutineManager,
     private val propertiesStorage: ReleasesPropertiesStorage,
 ) : TelegramLongPollingBot() {
 
     /** если true, то запросы кидаются на порт 1, если false то на порт 2**/
-    var isFirstActive: Boolean = true
+    fun isFirstActive() = redisService.getSafe(RR_IS_FIRST_ACTIVE).toBoolean()
 
     @Value("\${router.main.bot.host:127.0.0.1}")
     private lateinit var botHost: String
@@ -66,6 +69,12 @@ class RouterService(
         }
     }
 
+    @Synchronized
+    fun resetPort() {
+        val newIsFirstActive = isFirstActive() xor true
+        redisService.setValue(RR_IS_FIRST_ACTIVE, newIsFirstActive.toString())
+    }
+
     @PostConstruct
     fun botConnect() {
         val reconnectPause: Long = 1000
@@ -96,6 +105,6 @@ class RouterService(
 
     override fun getBotUsername() = propertiesStorage.prodGeneral.name
     override fun getBotToken() = propertiesStorage.prodGeneral.token
-    private fun portResolve() = if (isFirstActive) propertiesStorage.prod1.port else propertiesStorage.prod2.port
+    private fun portResolve() = if (isFirstActive()) propertiesStorage.prod1.port else propertiesStorage.prod2.port
     private fun url() = URL("http", botHost, portResolve(), "").toString()
 }
