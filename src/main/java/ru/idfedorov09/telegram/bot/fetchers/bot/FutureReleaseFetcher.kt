@@ -188,7 +188,7 @@ class FutureReleaseFetcher(
     private suspend fun roadToProduction(
         pauseBeforeToggleMainProfile: Long = 15000,
     ) {
-        val isFirst = routerService.isFirstActive
+        val isFirst = routerService.isFirstActive()
         val newProfileKey = if (isFirst) RR_PROFILE2 else RR_PROFILE1
         val propertiesBase = if (isFirst) releasesPropertiesStorage.prod2 else releasesPropertiesStorage.prod1
 
@@ -201,7 +201,7 @@ class FutureReleaseFetcher(
         cd2bService.setPort(newProfileName, propertiesBase.port.toString())
         cd2bService.rerunProfile(newProfileName, shouldRebuild = true)
         delay(pauseBeforeToggleMainProfile)
-        routerService.isFirstActive = isFirst xor true
+        routerService.resetPort()
 
         bot.execute(
             SendMessage().also {
